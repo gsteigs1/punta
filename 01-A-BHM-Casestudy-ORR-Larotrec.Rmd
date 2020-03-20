@@ -1,0 +1,245 @@
+---
+title: "01-A-BHM-Casestudy-ORR-Larotrectinib"
+author: "Sandro Gsteiger"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  word_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 7
+    highlight: 'default'
+    reference_docx: word_template.docx
+    toc: yes
+    toc_depth: 4
+  # html_document:
+  #   toc: true
+  #   toc_float: true
+  #   number_sections: true
+  # editor_options: 
+  #   chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+rm(list = ls())
+
+library(readxl)
+library(dplyr)
+library(R2jags)
+library(ggplot2)
+
+for(s in dir("R")){
+  source(file.path(".", "R", s))
+}
+
+r_seed <- 8945334
+```
+
+# Description
+
+Reproduce Bayesian hierarchical model from ERG analysis, NICE STA Committee papers (ID1299).
+
+
+
+# Reproduce ERG meta-analysis of ORR data
+Read in response rate data (extracted from EPAR).
+As ERG: select all tumour types expect Primary CNS.
+```{r}
+dorr <- read_excel("data/Larotrectinib-EPAR.xlsx", sheet = "ORR")
+dorr
+
+dorr_erg <- dorr %>%
+  filter(ERGincluded == 1) %>%
+  select(-ERGincluded)
+dorr_erg
+sum(dorr_erg$n)
+```
+
+Total sample size (N=93) matches ERG  analysis.
+
+
+Global parameters
+```{r}
+djags <- list(ns = nrow(dorr_erg),
+              r = dorr_erg$x,
+              n = dorr_erg$n)
+
+n_chains <- 3
+n_iter <- 10000
+n_burnin <- 2000
+n_thin <- 1
+
+pars_fe <- c("mu", "p.pop", "p", "theta", "theta.new", "p.new")
+```
+
+Priors selected by ERG, see Section 4.6 (ERG report page 66 (which is page 490 in Committee papers pdf)).
+Note: inconsistency in ERG report page 66: "The prior distribution for  was centred around a probability of 0.3 (a log-odds of -1.3863)".
+-> logit(0.3) = -0.847
+-> inv.logit(-1.3863) ~= 0.2 (which sounds low)
+I select p=0.3.
+```{r}
+erg_priors <- list(
+  prior.fe.mean = boot::logit(0.3),
+  prior.fe.prec = 1/10,
+  prior.re.lo = 0,
+  prior.re.up = 5
+)
+```
+
+Fit the random effects MA model used by the ERG.
+```{r}
+set.seed(r_seed)
+fit_re <- jags(data = c(djags, erg_priors),
+               n.chains = n_chains,
+               n.iter = n_iter,
+               n.burnin = n_burnin,
+               n.thin = n_thin,
+               parameters = c(pars_fe, "re.sd"),
+               inits = NULL,
+               model.file = "models/bin_abs_re_unif.jgmod")
+```
+
+
+__Results: reproducing the ERG analysis__
+
+```{r}
+## print the (BUGS) output summaries: RE model
+# fit_re
+
+## summaries as in forest plots
+sum_re <- get_bin_forestdata(fit_re, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
+```
+
+
+__Table__ Reproducing ERG analysis: Study specific estimates
+```{r, results='asis'}
+pander::pandoc.table(sum_re, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
+```
+
+__Figure__ Reproducing ERG analysis: Forest plot
+```{r, fig.height=4, fig.width=7}
+dfig <- sum_re %>%
+  mutate(ro = n():1)
+fig <- ggplot(data = dfig) +
+  geom_linerange(aes(x = ro, ymin = ci_lo, ymax = ci_up)) +
+  geom_text(aes(x = ro, y = -0.05, label = node), hjust = "right") +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid = element_blank()) +
+  ylim(-0.75, 1) +
+  xlab("") +
+  ylab("") +
+  coord_flip()
+fig
+
+rm(fig, dfig)
+```
+
+
+# For comparison: corresponding fixed effect model
+```{r}
+set.seed(r_seed)
+fit_fe <- jags(data = c(djags, erg_priors[1:2]),
+               n.chains = n_chains,
+               n.iter = n_iter,
+               n.burnin = n_burnin,
+               n.thin = n_thin,
+               parameters = pars_fe,
+               inits = NULL,
+               model.file = "models/bin_abs_fe.jgmod")
+```
+
+__Results: FE model__
+
+```{r}
+## print the (BUGS) output summaries: RE model
+# fit_fe
+
+## summaries as in forest plots
+sum_fe <- get_bin_forestdata(fit_fe, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
+```
+
+
+__Table__ FE model estimates
+```{r, results='asis'}
+pander::pandoc.table(sum_fe, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
+```
+
+__Figure__ FE model: Forest plot
+```{r, fig.height=4, fig.width=7}
+dfig <- sum_fe %>%
+  mutate(ro = n():1)
+fig <- ggplot(data = dfig) +
+  geom_linerange(aes(x = ro, ymin = ci_lo, ymax = ci_up)) +
+  geom_text(aes(x = ro, y = -0.05, label = node), hjust = "right") +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid = element_blank()) +
+  ylim(-0.75, 1) +
+  xlab("") +
+  ylab("") +
+  coord_flip()
+fig
+
+rm(fig, dfig)
+```
+
+
+
+# My analysis with alternative prior
+Use the same priors for the population mean mu, but instead of the U(0,5) for RE SD, use a half-normal(0,1).
+
+```{r}
+my_priors <- list(
+  prior.fe.mean = boot::logit(0.3),
+  prior.fe.prec = 1/10,
+  prior.re.mean = 0,
+  prior.re.prec = 1
+)
+  
+set.seed(3 * r_seed)
+fit_re_hn <- jags(data = c(djags, my_priors),
+               n.chains = n_chains,
+               n.iter = n_iter,
+               n.burnin = n_burnin,
+               n.thin = n_thin,
+               parameters = c(pars_fe, "re.sd"),
+               inits = NULL,
+               model.file = "models/bin_abs_re_hn.jgmod")
+```
+
+
+__Results: Alternative RE model__
+
+```{r}
+## print the (BUGS) output summaries: RE model
+# fit_re_hn
+
+## summaries as in forest plots
+sum_re_hn <- get_bin_forestdata(fit_re_hn, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
+```
+
+
+__Table__ Alternative RE model estimates
+```{r, results='asis'}
+pander::pandoc.table(sum_re_hn, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
+```
+
+__Figure__ Alternative RE model: Forest plot
+```{r, fig.height=4, fig.width=7}
+dfig <- sum_re_hn %>%
+  mutate(ro = n():1)
+fig <- ggplot(data = dfig) +
+  geom_linerange(aes(x = ro, ymin = ci_lo, ymax = ci_up)) +
+  geom_text(aes(x = ro, y = -0.05, label = node), hjust = "right") +
+  theme_bw() +
+  theme(panel.border = element_blank(), panel.grid = element_blank()) +
+  ylim(-0.75, 1) +
+  xlab("") +
+  ylab("") +
+  coord_flip()
+fig
+
+rm(fig, dfig)
+```
+
+

@@ -1,0 +1,23 @@
+# JAGS model code for meta-analysis of binary data.
+# Absolute outcome scale (e.g. response rate), used to synthesize e.g. baseline.
+# Fixed effects model.
+model{
+  
+  ## sampling model (likelihood)
+  for (i in 1:ns) {# studies
+      logit(p[i])  <- theta[i]
+      theta[i] <- mu
+
+      r[i] ~ dbin(p[i], n[i])  
+    }
+    
+  ## priors
+  mu ~ dnorm(prior.fe.mean, prior.fe.prec)
+  
+  ## predictive distributions  
+  theta.new <- mu
+  logit(p.new) <- theta.new
+  
+  ## derived parameters
+  logit(p.pop) <- mu
+} 

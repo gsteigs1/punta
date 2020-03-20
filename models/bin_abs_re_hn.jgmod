@@ -1,0 +1,25 @@
+# JAGS model code for meta-analysis of binary data.
+# Absolute outcome scale (e.g. response rate), used to synthesize e.g. baseline.
+# Random effects model, half-normal prior for RE SD.
+model{
+  
+  ## sampling model (likelihood)
+  for (i in 1:ns) {# studies
+    logit(p[i])  <- theta[i]
+    theta[i] ~ dnorm(mu, re.prec)
+    
+    r[i] ~ dbin(p[i], n[i])  
+  }
+  
+  ## priors
+  mu ~ dnorm(prior.fe.mean, prior.fe.prec)
+  re.sd ~ dnorm(prior.re.mean, prior.re.prec)T(0,)
+  
+  ## predictive distributions  
+  theta.new ~ dnorm(mu, re.prec)
+  logit(p.new) <- theta.new
+  
+  ## derived parameters
+  re.prec <- pow(re.sd, -2)
+  logit(p.pop) <- mu
+} 
