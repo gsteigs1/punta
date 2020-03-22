@@ -17,6 +17,7 @@ output:
   #   number_sections: true
   # editor_options: 
   #   chunk_output_type: console
+knit: (function(inputFile, encoding) {rmarkdown::render(inputFile, encoding = encoding, output_dir = "outputs")})
 ---
 
 ```{r setup, include=FALSE}
@@ -38,9 +39,13 @@ r_seed <- 8945334
 
 # Description
 
-Reproduce Bayesian hierarchical model from ERG analysis, NICE STA Committee papers (ID1299).
+Reproduce Bayesian hierarchical model for Larotrectinib ORR data from ERG analysis, NICE STA Committee papers (ID1299).
 
+In addition:  
 
+* Fit fixed effects (FE) meta-analysis (MA) model.
+* Fit random effects (RE) meta-analysis (MA) with alternative prior (half-normal(0, 1)).
+* Fit RE MA models to subset of data where only tissues with at least one event and one non-event retained.
 
 # Reproduce ERG meta-analysis of ORR data
 Read in response rate data (extracted from EPAR).
@@ -109,6 +114,12 @@ __Results: reproducing the ERG analysis__
 
 ## summaries as in forest plots
 sum_re <- get_bin_forestdata(fit_re, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
+
+## threshold probabilities
+p_better_re <- get_bin_threshold(fit_re, thresholds = c(0.2, 0.3, 0.5), 
+                                 node.stem = "p", node.extras = c(".pop", ".new"), 
+                                 study.labs = dorr_erg$`Tumour type`)
+
 ```
 
 
@@ -121,19 +132,17 @@ __Figure__ Reproducing ERG analysis: Forest plot
 ```{r, fig.height=4, fig.width=7}
 dfig <- sum_re %>%
   mutate(ro = n():1)
-fig <- ggplot(data = dfig) +
-  geom_linerange(aes(x = ro, ymin = ci_lo, ymax = ci_up)) +
-  geom_text(aes(x = ro, y = -0.05, label = node), hjust = "right") +
-  theme_bw() +
-  theme(panel.border = element_blank(), panel.grid = element_blank()) +
-  ylim(-0.75, 1) +
-  xlab("") +
-  ylab("") +
-  coord_flip()
+fig <- plot_bin_forest(dfig, x.lab = "Response probability", y.lab = "Tissue")
 fig
 
 rm(fig, dfig)
 ```
+
+__Table__ Reproducing ERG analysis: Threshold probabilities
+```{r, results='asis'}
+pander::pandoc.table(p_better_re, row.names = FALSE, split.tables = Inf, justify = "llll", digits = 3)
+```
+
 
 
 # For comparison: corresponding fixed effect model
@@ -157,6 +166,12 @@ __Results: FE model__
 
 ## summaries as in forest plots
 sum_fe <- get_bin_forestdata(fit_fe, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
+
+## threshold probabilities
+p_better_fe <- get_bin_threshold(fit_fe, thresholds = c(0.2, 0.3, 0.5), 
+                                 node.stem = "p", node.extras = c(".pop", ".new"), 
+                                 study.labs = dorr_erg$`Tumour type`)
+
 ```
 
 
@@ -169,20 +184,16 @@ __Figure__ FE model: Forest plot
 ```{r, fig.height=4, fig.width=7}
 dfig <- sum_fe %>%
   mutate(ro = n():1)
-fig <- ggplot(data = dfig) +
-  geom_linerange(aes(x = ro, ymin = ci_lo, ymax = ci_up)) +
-  geom_text(aes(x = ro, y = -0.05, label = node), hjust = "right") +
-  theme_bw() +
-  theme(panel.border = element_blank(), panel.grid = element_blank()) +
-  ylim(-0.75, 1) +
-  xlab("") +
-  ylab("") +
-  coord_flip()
+fig <- plot_bin_forest(dfig, x.lab = "Response probability", y.lab = "Tissue")
 fig
 
 rm(fig, dfig)
 ```
 
+__Table__ FE model: Threshold probabilities
+```{r, results='asis'}
+pander::pandoc.table(p_better_fe, row.names = FALSE, split.tables = Inf, justify = "llll", digits = 3)
+```
 
 
 # My analysis with alternative prior
@@ -208,7 +219,7 @@ fit_re_hn <- jags(data = c(djags, my_priors),
 ```
 
 
-__Results: Alternative RE model__
+__Results: Alternative RE prior__
 
 ```{r}
 ## print the (BUGS) output summaries: RE model
@@ -216,30 +227,33 @@ __Results: Alternative RE model__
 
 ## summaries as in forest plots
 sum_re_hn <- get_bin_forestdata(fit_re_hn, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
+
+## threshold probabilities
+p_better_re_hn <- get_bin_threshold(fit_re_hn, thresholds = c(0.2, 0.3, 0.5), 
+                                    node.stem = "p", node.extras = c(".pop", ".new"), 
+                                    study.labs = dorr_erg$`Tumour type`)
+
 ```
 
 
-__Table__ Alternative RE model estimates
+__Table__ Alternative RE prior: response estimates
 ```{r, results='asis'}
 pander::pandoc.table(sum_re_hn, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
 ```
 
-__Figure__ Alternative RE model: Forest plot
+__Figure__ Alternative RE prior: Forest plot
 ```{r, fig.height=4, fig.width=7}
 dfig <- sum_re_hn %>%
   mutate(ro = n():1)
-fig <- ggplot(data = dfig) +
-  geom_linerange(aes(x = ro, ymin = ci_lo, ymax = ci_up)) +
-  geom_text(aes(x = ro, y = -0.05, label = node), hjust = "right") +
-  theme_bw() +
-  theme(panel.border = element_blank(), panel.grid = element_blank()) +
-  ylim(-0.75, 1) +
-  xlab("") +
-  ylab("") +
-  coord_flip()
+fig <- plot_bin_forest(dfig, x.lab = "Response probability", y.lab = "Tissue")
 fig
 
 rm(fig, dfig)
 ```
 
+
+__Table__ Alternative RE prior: Threshold probabilities
+```{r, results='asis'}
+pander::pandoc.table(p_better_re_hn, row.names = FALSE, split.tables = Inf, justify = "llll", digits = 3)
+```
 
