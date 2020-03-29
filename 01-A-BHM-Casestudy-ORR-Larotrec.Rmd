@@ -27,6 +27,7 @@ rm(list = ls())
 
 library(readxl)
 library(dplyr)
+library(reshape2)
 library(R2jags)
 library(ggplot2)
 
@@ -48,24 +49,20 @@ In addition:
 * Fit RE MA models to subset of data where only tissues with at least one event and one non-event retained.
 
 # Reproduce ERG meta-analysis of ORR data
-Read in response rate data (extracted from EPAR).
-As ERG: select all tumour types expect Primary CNS.
-```{r}
-dorr <- read_excel("data/Larotrectinib-EPAR.xlsx", sheet = "ORR")
-dorr
+Read in response rate data extracted from ERG report in NICE Committee papers.
 
-dorr_erg <- dorr %>%
-  filter(ERGincluded == 1) %>%
-  select(-ERGincluded)
-dorr_erg
-sum(dorr_erg$n)
+__Table__ ORR data included in BHM by ERG
+```{r, results='asis'}
+dorr_erg <- read_excel("data/Larotrectinib-ORR.xlsx", sheet = "ERG-Table7") %>%
+  mutate(orr = x / n)
+pander::pandoc.table(dorr_erg, row.names = FALSE, split.tables = Inf, justify = "lrrl", digits = 2)
 ```
 
-Total sample size (N=93) matches ERG  analysis.
+Total sample size matches ERG analysis: `r sum(dorr_erg$n)`.
 
 
-Global parameters
-```{r}
+Global parameters for BHM.
+```{r, echo=TRUE}
 djags <- list(ns = nrow(dorr_erg),
               r = dorr_erg$x,
               n = dorr_erg$n)
@@ -79,7 +76,8 @@ pars_fe <- c("mu", "p.pop", "p", "theta", "theta.new", "p.new")
 ```
 
 Priors selected by ERG, see Section 4.6 (ERG report page 66 (which is page 490 in Committee papers pdf)).
-Note: inconsistency in ERG report page 66: "The prior distribution for  was centred around a probability of 0.3 (a log-odds of -1.3863)".
+
+Note: inconsistency in ERG report page 66: "The prior distribution for p was centred around a probability of 0.3 (a log-odds of -1.3863)".
 -> logit(0.3) = -0.847
 -> inv.logit(-1.3863) ~= 0.2 (which sounds low)
 I select p=0.3.
@@ -116,7 +114,7 @@ __Results: reproducing the ERG analysis__
 sum_re <- get_bin_forestdata(fit_re, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
 
 ## threshold probabilities
-p_better_re <- get_bin_threshold(fit_re, thresholds = c(0.2, 0.3, 0.5), 
+p_better_re <- get_bin_threshold(fit_re, thresholds = c(0.1, 0.2, 0.3, 0.5), 
                                  node.stem = "p", node.extras = c(".pop", ".new"), 
                                  study.labs = dorr_erg$`Tumour type`)
 
@@ -140,7 +138,29 @@ rm(fig, dfig)
 
 __Table__ Reproducing ERG analysis: Threshold probabilities
 ```{r, results='asis'}
-pander::pandoc.table(p_better_re, row.names = FALSE, split.tables = Inf, justify = "llll", digits = 3)
+pander::pandoc.table(p_better_re, row.names = FALSE, split.tables = Inf, digits = 3, justify = "left")
+```
+
+
+__Figure__ Reproducing ERG analysis: Density estimates of response probability per tissue
+```{r}
+dsims <- get_bin_samples(fit_re, 
+                         node.stem = "p", 
+                         study.labs = dorr_erg$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value)) +
+  facet_wrap(~Tumour_type, ncol = 4) +
+  xlab("Response probability")
+fig
+
+fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
+  xlab("Response probability")
+fig
+
+rm(dsims, fig)
 ```
 
 
@@ -168,7 +188,7 @@ __Results: FE model__
 sum_fe <- get_bin_forestdata(fit_fe, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
 
 ## threshold probabilities
-p_better_fe <- get_bin_threshold(fit_fe, thresholds = c(0.2, 0.3, 0.5), 
+p_better_fe <- get_bin_threshold(fit_fe, thresholds = c(0.1, 0.2, 0.3, 0.5), 
                                  node.stem = "p", node.extras = c(".pop", ".new"), 
                                  study.labs = dorr_erg$`Tumour type`)
 
@@ -192,11 +212,33 @@ rm(fig, dfig)
 
 __Table__ FE model: Threshold probabilities
 ```{r, results='asis'}
-pander::pandoc.table(p_better_fe, row.names = FALSE, split.tables = Inf, justify = "llll", digits = 3)
+pander::pandoc.table(p_better_fe, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
 ```
 
 
-# My analysis with alternative prior
+__Figure__ FE model: Density estimates of response probability per tissue
+```{r}
+dsims <- get_bin_samples(fit_fe, 
+                         node.stem = "p", 
+                         study.labs = dorr_erg$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value)) +
+  facet_wrap(~Tumour_type, ncol = 4) +
+  xlab("Response probability")
+fig
+
+fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
+  xlab("Response probability")
+fig
+
+rm(dsims, fig)
+```
+
+
+# Analysis with alternative prior
 Use the same priors for the population mean mu, but instead of the U(0,5) for RE SD, use a half-normal(0,1).
 
 ```{r}
@@ -229,7 +271,7 @@ __Results: Alternative RE prior__
 sum_re_hn <- get_bin_forestdata(fit_re_hn, node.stem = "p", study.labs = dorr_erg$`Tumour type`)
 
 ## threshold probabilities
-p_better_re_hn <- get_bin_threshold(fit_re_hn, thresholds = c(0.2, 0.3, 0.5), 
+p_better_re_hn <- get_bin_threshold(fit_re_hn, thresholds = c(0.1, 0.2, 0.3, 0.5), 
                                     node.stem = "p", node.extras = c(".pop", ".new"), 
                                     study.labs = dorr_erg$`Tumour type`)
 
@@ -254,6 +296,194 @@ rm(fig, dfig)
 
 __Table__ Alternative RE prior: Threshold probabilities
 ```{r, results='asis'}
-pander::pandoc.table(p_better_re_hn, row.names = FALSE, split.tables = Inf, justify = "llll", digits = 3)
+pander::pandoc.table(p_better_re_hn, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
 ```
 
+
+__Figure__ Alternative RE prior: Density estimates of response probability per tissue
+```{r}
+dsims <- get_bin_samples(fit_re_hn, 
+                         node.stem = "p", 
+                         study.labs = dorr_erg$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value)) +
+  facet_wrap(~Tumour_type, ncol = 4) +
+  xlab("Response probability")
+fig
+
+fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
+  xlab("Response probability")
+fig
+
+rm(dsims, fig)
+```
+
+
+# Analysis with reduced data set (ERG prior)
+ERG model applied to a reduced data set: contains only tissue types with at least 1 event and 1 non-event. This means the analysis data set is the following.
+
+__Table__ ORR data (reduced set)
+```{r, results='asis'}
+dorr_sub <- dorr_erg %>%
+  filter(x >= 1, n - x >= 1)
+
+pander::pandoc.table(dorr_sub, row.names = FALSE, split.tables = Inf, justify = "lrlr", digits = 2)
+```
+
+
+```{r}
+djags_sub <- list(ns = nrow(dorr_sub),
+                  r = dorr_sub$x,
+                  n = dorr_sub$n)
+
+set.seed(4 * r_seed)
+fit_re_sub <- jags(data = c(djags_sub, erg_priors),
+                   n.chains = n_chains,
+                   n.iter = n_iter,
+                   n.burnin = n_burnin,
+                   n.thin = n_thin,
+                   parameters = c(pars_fe, "re.sd"),
+                   inits = NULL,
+                   model.file = "models/bin_abs_re_unif.jgmod")
+```
+
+
+__Results: Reduced data set__
+
+```{r}
+## summaries as in forest plots
+sum_re_sub <- get_bin_forestdata(fit_re_sub, node.stem = "p", study.labs = dorr_sub$`Tumour type`)
+
+## threshold probabilities
+p_better_re_sub <- get_bin_threshold(fit_re_sub, thresholds = c(0.1, 0.2, 0.3, 0.5), 
+                                    node.stem = "p", node.extras = c(".pop", ".new"), 
+                                    study.labs = dorr_sub$`Tumour type`)
+
+```
+
+
+__Table__ Reduced data set: response estimates
+```{r, results='asis'}
+pander::pandoc.table(sum_re_sub, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
+```
+
+__Figure__ Reduced data set: Forest plot
+```{r, fig.height=4, fig.width=7}
+dfig <- sum_re_sub %>%
+  mutate(ro = n():1)
+fig <- plot_bin_forest(dfig, x.lab = "Response probability", y.lab = "Tissue")
+fig
+
+rm(fig, dfig)
+```
+
+
+__Table__ Reduced data set: Threshold probabilities
+```{r, results='asis'}
+pander::pandoc.table(p_better_re_sub, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+
+__Figure__ Reduced data set: Density estimates of response probability per tissue
+```{r}
+dsims <- get_bin_samples(fit_re_sub, 
+                         node.stem = "p", 
+                         study.labs = dorr_sub$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value)) +
+  facet_wrap(~Tumour_type, ncol = 4) +
+  xlab("Response probability")
+fig
+
+fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
+  xlab("Response probability")
+fig
+
+rm(dsims, fig)
+```
+
+
+# Analysis with reduced data set and with my prior
+
+```{r}
+set.seed(5 * r_seed)
+fit_re_sub_hn <- jags(data = c(djags_sub, my_priors),
+                   n.chains = n_chains,
+                   n.iter = n_iter,
+                   n.burnin = n_burnin,
+                   n.thin = n_thin,
+                   parameters = c(pars_fe, "re.sd"),
+                   inits = NULL,
+                   model.file = "models/bin_abs_re_hn.jgmod")
+```
+
+
+__Results: Reduced data set__
+
+```{r}
+## summaries as in forest plots
+sum_re_sub_hn <- get_bin_forestdata(fit_re_sub_hn, node.stem = "p", study.labs = dorr_sub$`Tumour type`)
+
+## threshold probabilities
+p_better_re_sub_hn <- get_bin_threshold(fit_re_sub_hn, thresholds = c(0.1, 0.2, 0.3, 0.5), 
+                                    node.stem = "p", node.extras = c(".pop", ".new"), 
+                                    study.labs = dorr_sub$`Tumour type`)
+
+```
+
+
+__Table__ Reduced data set: response estimates
+```{r, results='asis'}
+pander::pandoc.table(sum_re_sub_hn, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
+```
+
+__Figure__ Reduced data set: Forest plot
+```{r, fig.height=4, fig.width=7}
+dfig <- sum_re_sub_hn %>%
+  mutate(ro = n():1)
+fig <- plot_bin_forest(dfig, x.lab = "Response probability", y.lab = "Tissue")
+fig
+
+rm(fig, dfig)
+```
+
+
+__Table__ Reduced data set: Threshold probabilities
+```{r, results='asis'}
+pander::pandoc.table(p_better_re_sub_hn, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+
+__Figure__ Reduced data set: Density estimates of response probability per tissue
+```{r}
+dsims <- get_bin_samples(fit_re_sub_hn, 
+                         node.stem = "p", 
+                         study.labs = dorr_sub$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value)) +
+  facet_wrap(~Tumour_type, ncol = 4) +
+  xlab("Response probability")
+fig
+
+fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
+  geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
+  xlab("Response probability")
+fig
+
+rm(dsims, fig)
+```
+
+
+# Session info
+```{r}
+getwd()
+sessionInfo()
+```
