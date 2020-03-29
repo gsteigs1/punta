@@ -68,7 +68,7 @@ djags <- list(ns = nrow(dorr_erg),
               n = dorr_erg$n)
 
 n_chains <- 3
-n_iter <- 10000
+n_iter <- 15000
 n_burnin <- 2000
 n_thin <- 1
 
@@ -77,10 +77,16 @@ pars_fe <- c("mu", "p.pop", "p", "theta", "theta.new", "p.new")
 
 Priors selected by ERG, see Section 4.6 (ERG report page 66 (which is page 490 in Committee papers pdf)).
 
-Note: inconsistency in ERG report page 66: "The prior distribution for p was centred around a probability of 0.3 (a log-odds of -1.3863)".
+**Note:** there are two inconsistencies in the ERG report page 66 regarding prior distributions: 
+
+1. "The prior distribution for p was centred around a probability of 0.3 (a log-odds of -1.3863)".
 -> logit(0.3) = -0.847
 -> inv.logit(-1.3863) ~= 0.2 (which sounds low)
 I select p=0.3.
+
+2. They sey they have selected a uniform prior U(0,5) for the random effects variance as suggested by Cunanan (2019). But the recommendation from Cunanan is to put this prior on the heterogeneity sd, not on the var. I will put the U(0,5) on the sd. This leads to the same results as and in particular to the same predictive distribution of a new effect as presented by the ERG. Therefore, I believe the ERG did, in their modelling, put the prior on the sd, while the text contains a slight error.
+
+
 ```{r}
 erg_priors <- list(
   prior.fe.mean = boot::logit(0.3),
@@ -107,6 +113,8 @@ fit_re <- jags(data = c(djags, erg_priors),
 __Results: reproducing the ERG analysis__
 
 ```{r}
+# extract results and derive summaries needed later on for tables and figures
+
 ## print the (BUGS) output summaries: RE model
 # fit_re
 
@@ -118,6 +126,17 @@ p_better_re <- get_bin_threshold(fit_re, thresholds = c(0.1, 0.2, 0.3, 0.5),
                                  node.stem = "p", node.extras = c(".pop", ".new"), 
                                  study.labs = dorr_erg$`Tumour type`)
 
+## data frame with the MCMC iterations: response rates
+dsims <- get_bin_samples(fit_re, 
+                         node.stem = "p", 
+                         study.labs = dorr_erg$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+## data frame with the MCMC iterations: re.sd (to compare prior/posterior)
+dsims_re <- get_bin_samples(fit_re, 
+                         node.stem = "re.sd", 
+                         node.extras = NULL,
+                         val.name = "re.sd")
 ```
 
 
@@ -144,23 +163,35 @@ pander::pandoc.table(p_better_re, row.names = FALSE, split.tables = Inf, digits 
 
 __Figure__ Reproducing ERG analysis: Density estimates of response probability per tissue
 ```{r}
-dsims <- get_bin_samples(fit_re, 
-                         node.stem = "p", 
-                         study.labs = dorr_erg$`Tumour type`, 
-                         var.name = "Tumour_type")
-
 fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value)) +
   facet_wrap(~Tumour_type, ncol = 4) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 rm(dsims, fig)
+```
+
+
+__Figure__ Reproducing ERG analysis: Prior and posterior of random effect standard deviation
+```{r}
+dprior <- data.frame(x = c(erg_priors$prior.re.lo, erg_priors$prior.re.up),
+                     y = rep(1/diff(c(erg_priors$prior.re.lo, erg_priors$prior.re.up)), 2))
+
+fig <- ggplot(data = dsims_re) +
+  geom_density(aes(re.sd), fill = 2, alpha = 0.5, lwd = 1.2) +
+  geom_line(data = dprior, aes(x, y), linetype = "dashed", lwd = 1.2) +
+  theme_bw()
+fig
+
+rm(dsims_re, fig)
 ```
 
 
@@ -226,12 +257,14 @@ dsims <- get_bin_samples(fit_fe,
 fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value)) +
   facet_wrap(~Tumour_type, ncol = 4) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 rm(dsims, fig)
@@ -275,6 +308,19 @@ p_better_re_hn <- get_bin_threshold(fit_re_hn, thresholds = c(0.1, 0.2, 0.3, 0.5
                                     node.stem = "p", node.extras = c(".pop", ".new"), 
                                     study.labs = dorr_erg$`Tumour type`)
 
+## data frame with the MCMC iterations: response rates
+dsims <- get_bin_samples(fit_re_hn, 
+                         node.stem = "p", 
+                         study.labs = dorr_erg$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+
+## data frame with the MCMC iterations: re.sd (to compare prior/posterior)
+dsims_re <- get_bin_samples(fit_re_hn, 
+                         node.stem = "re.sd", 
+                         node.extras = NULL,
+                         val.name = "re.sd")
+
 ```
 
 
@@ -302,27 +348,41 @@ pander::pandoc.table(p_better_re_hn, row.names = FALSE, split.tables = Inf, just
 
 __Figure__ Alternative RE prior: Density estimates of response probability per tissue
 ```{r}
-dsims <- get_bin_samples(fit_re_hn, 
-                         node.stem = "p", 
-                         study.labs = dorr_erg$`Tumour type`, 
-                         var.name = "Tumour_type")
-
 fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value)) +
   facet_wrap(~Tumour_type, ncol = 4) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 rm(dsims, fig)
 ```
 
 
-# Analysis with reduced data set (ERG prior)
+__Figure__ Alternative RE prior: Prior and posterior of random effect standard deviation
+```{r}
+dprior <- data.frame(x = seq(0, 5, 0.1)) %>%
+  mutate(y = 2 * dnorm(x, 
+                       mean = my_priors$prior.re.mean, 
+                       sd = sqrt(1/my_priors$prior.re.prec)))
+
+fig <- ggplot(data = dsims_re) +
+  geom_density(aes(re.sd), fill = 2, alpha = 0.5, lwd = 1.2) +
+  geom_line(data = dprior, aes(x, y), linetype = "dashed", lwd = 1.2) +
+  theme_bw()
+fig
+
+rm(dsims_re, fig)
+```
+
+
+# Analysis with reduced data set (but with ERG prior)
 ERG model applied to a reduced data set: contains only tissue types with at least 1 event and 1 non-event. This means the analysis data set is the following.
 
 __Table__ ORR data (reduced set)
@@ -362,6 +422,18 @@ p_better_re_sub <- get_bin_threshold(fit_re_sub, thresholds = c(0.1, 0.2, 0.3, 0
                                     node.stem = "p", node.extras = c(".pop", ".new"), 
                                     study.labs = dorr_sub$`Tumour type`)
 
+## data frame with the MCMC iterations: response rates
+dsims <- get_bin_samples(fit_re_sub, 
+                         node.stem = "p", 
+                         study.labs = dorr_sub$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+## data frame with the MCMC iterations: re.sd (to compare prior/posterior)
+dsims_re <- get_bin_samples(fit_re_sub, 
+                         node.stem = "re.sd", 
+                         node.extras = NULL,
+                         val.name = "re.sd")
+
 ```
 
 
@@ -389,23 +461,34 @@ pander::pandoc.table(p_better_re_sub, row.names = FALSE, split.tables = Inf, jus
 
 __Figure__ Reduced data set: Density estimates of response probability per tissue
 ```{r}
-dsims <- get_bin_samples(fit_re_sub, 
-                         node.stem = "p", 
-                         study.labs = dorr_sub$`Tumour type`, 
-                         var.name = "Tumour_type")
-
 fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value)) +
   facet_wrap(~Tumour_type, ncol = 4) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 rm(dsims, fig)
+```
+
+__Figure__ Reduced data set: Prior and posterior of random effect standard deviation
+```{r}
+dprior <- data.frame(x = c(erg_priors$prior.re.lo, erg_priors$prior.re.up),
+                     y = rep(1/diff(c(erg_priors$prior.re.lo, erg_priors$prior.re.up)), 2))
+
+fig <- ggplot(data = dsims_re) +
+  geom_density(aes(re.sd), fill = 2, alpha = 0.5, lwd = 1.2) +
+  geom_line(data = dprior, aes(x, y), linetype = "dashed", lwd = 1.2) +
+  theme_bw()
+fig
+
+rm(dsims_re, fig)
 ```
 
 
@@ -424,7 +507,7 @@ fit_re_sub_hn <- jags(data = c(djags_sub, my_priors),
 ```
 
 
-__Results: Reduced data set__
+__Results: Reduced data set and alternative RE prior__
 
 ```{r}
 ## summaries as in forest plots
@@ -434,16 +517,27 @@ sum_re_sub_hn <- get_bin_forestdata(fit_re_sub_hn, node.stem = "p", study.labs =
 p_better_re_sub_hn <- get_bin_threshold(fit_re_sub_hn, thresholds = c(0.1, 0.2, 0.3, 0.5), 
                                     node.stem = "p", node.extras = c(".pop", ".new"), 
                                     study.labs = dorr_sub$`Tumour type`)
+## data frame with the MCMC iterations: response rates
+dsims <- get_bin_samples(fit_re_sub_hn, 
+                         node.stem = "p", 
+                         study.labs = dorr_sub$`Tumour type`, 
+                         var.name = "Tumour_type")
+
+## data frame with the MCMC iterations: re.sd (to compare prior/posterior)
+dsims_re <- get_bin_samples(fit_re_sub_hn, 
+                         node.stem = "re.sd", 
+                         node.extras = NULL,
+                         val.name = "re.sd")
 
 ```
 
 
-__Table__ Reduced data set: response estimates
+__Table__ Reduced data set and alternative RE prior: response estimates
 ```{r, results='asis'}
 pander::pandoc.table(sum_re_sub_hn, row.names = FALSE, split.tables = Inf, justify = "lccc", digits = 2)
 ```
 
-__Figure__ Reduced data set: Forest plot
+__Figure__ Reduced data set and alternative RE prior: Forest plot
 ```{r, fig.height=4, fig.width=7}
 dfig <- sum_re_sub_hn %>%
   mutate(ro = n():1)
@@ -454,31 +548,98 @@ rm(fig, dfig)
 ```
 
 
-__Table__ Reduced data set: Threshold probabilities
+__Table__ Reduced data set and alternative RE prior: Threshold probabilities
 ```{r, results='asis'}
 pander::pandoc.table(p_better_re_sub_hn, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
 ```
 
 
-__Figure__ Reduced data set: Density estimates of response probability per tissue
+__Figure__ Reduced data set and alternative RE prior: Density estimates of response probability per tissue
 ```{r}
-dsims <- get_bin_samples(fit_re_sub_hn, 
-                         node.stem = "p", 
-                         study.labs = dorr_sub$`Tumour type`, 
-                         var.name = "Tumour_type")
-
 fig <- ggplot(data = dsims %>% filter(!(Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value)) +
   facet_wrap(~Tumour_type, ncol = 4) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 fig <- ggplot(data = dsims %>% filter((Tumour_type %in% c("p.pop", "p.new")))) +
   geom_density(aes(value, fill = Tumour_type), alpha = 0.5) +
-  xlab("Response probability")
+  xlab("Response probability") +
+  theme_bw()
 fig
 
 rm(dsims, fig)
+```
+
+
+__Figure__ Reduced data set and alternative RE prior: Prior and posterior of random effect standard deviation
+```{r}
+dprior <- data.frame(x = seq(0, 5, 0.1)) %>%
+  mutate(y = 2 * dnorm(x, 
+                       mean = my_priors$prior.re.mean, 
+                       sd = sqrt(1/my_priors$prior.re.prec)))
+
+fig <- ggplot(data = dsims_re) +
+  geom_density(aes(re.sd), fill = 2, alpha = 0.5, lwd = 1.2) +
+  geom_line(data = dprior, aes(x, y), linetype = "dashed", lwd = 1.2) +
+  theme_bw()
+fig
+
+rm(dsims_re, fig)
+```
+
+
+# Compare posterior inferences across RE fits
+```{r}
+allfits <- list("ERG" = fit_re,
+                "Alternative heterogeneity prior (HN)" = fit_re_hn,
+                "Reduced data set" = fit_re_sub,
+                "Reduced data set and alterantive prior" = fit_re_sub_hn)
+
+## function to extract 95% CrI, quartiles, and median
+get_quantiles <- function(X, node){
+  sd <- X$BUGSoutput$sims.list[[node]]
+  qs <- quantile(sd, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+  IQR <- qs[4] - qs[2]
+  CrI.range <- qs[5] - qs[1]
+  out <- data.frame(t(qs), IQR, CrI.range, check.names = FALSE)
+  return(out)
+}
+```
+
+
+__Table__ Compare RE SD posterior summaries across models
+```{r}
+## re.se posterior summaries
+post_slist <- lapply(allfits, get_quantiles, node = "re.sd")
+post_mat <- matrix(unlist(post_slist),
+                     nrow = length(allfits),
+                     byrow = TRUE)
+post_all <- data.frame(Model = names(allfits), 
+                         post_mat)
+names(post_all)[-1] <- names(post_slist[[1]])
+
+pander::pandoc.table(post_all, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+
+rm(post_slist, post_mat, post_all)
+```
+
+
+__Table__ Compare p.new posterior summaries across models
+```{r}
+## p.new posterior summaries
+post_slist <- lapply(allfits, get_quantiles, node = "p.new")
+post_mat <- matrix(unlist(post_slist),
+                     nrow = length(allfits),
+                     byrow = TRUE)
+post_all <- data.frame(Model = names(allfits), 
+                         post_mat)
+names(post_all)[-1] <- names(post_slist[[1]])
+
+pander::pandoc.table(post_all, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+
+rm(post_slist, post_mat, post_all)
 ```
 
 
