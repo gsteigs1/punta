@@ -1,12 +1,28 @@
+#' Calculate posterior probabilities for a node to be above (list of) threshold.
+#'
+#' @param X Output of jags fit (object of class `rjags`).
+#' @param thresholds Vector of thresholds.
+#' @param node.stem Name of the node to extract (e.g. "p").
+#' @param node.extras Name extensions (e.g. ".new" if nodes "p.new" monitored and to be extracted).
+#' @param study.labs Labels for the extracted node.stem chains (e.g. if p[1], p[2] etc. correspond to studies).
+#'
+#' @return
+#' @export
+#'
+#' @examples
 get_bin_threshold <- function(X, 
                               thresholds,
                               node.stem,
                               node.extras = c(".pop", ".new"),
                               study.labs = NULL){
   
-  # select nodes of interest
   x_sims <- X$BUGSoutput$sims.list
-  node_sims <- x_sims[[node.stem]]
+  node_sims <- NULL
+  
+  # select nodes of interest
+  if(!is.null(node.stem)){
+    node_sims <- x_sims[[node.stem]]
+  }
   if(!is.null(study.labs)){
     colnames(node_sims) <- study.labs
   }
