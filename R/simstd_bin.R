@@ -28,13 +28,24 @@ simstd_bin <- function(par.sim, par.an, r.seed = NULL){
                       n.thin = par.an$n_thin,
                       parameters = par.an$monitor,
                       inits = NULL,
-                      model.file = par.an$model.file)
+                      model.file = par.an$model.file,
+                      progress.bar = "none")
   
-  # extract results
-  out <- data.frame(node = c("p.new", "re.sd"),
-                    rbind(get_quantiles(fit, "p.new"),
-                          get_quantiles(fit, "re.sd")),
-                    check.names = FALSE)
-  rownames(out) <- NULL
+  # extract posterior summaries
+  out1_w <- data.frame(node = c("p.new", "re.sd"),
+                       rbind(get_quantiles(fit, "p.new"),
+                             get_quantiles(fit, "re.sd")),
+                       check.names = FALSE)
+
+  # extract threshold probability
+  out2_w <- get_bin_threshold(fit, thresholds = par.an$p.threshold, 
+                              node.stem = NULL, 
+                              node.extras = "p.new", 
+                              study.labs = NULL)
+  
+  # combine
+  out_w <- suppressWarnings(out1_w %>% left_join(out2_w, by = "node"))
+  
+  out <- tidyr::gather(out_w, var1, value, 2:9, na.rm = TRUE)
   return(out)
 }

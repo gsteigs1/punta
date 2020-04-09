@@ -11,7 +11,7 @@ get_quantiles <- function(X, node){
   sd <- X$BUGSoutput$sims.list[[node]]
   qs <- quantile(sd, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
   IQR <- qs[4] - qs[2]
-  CrI.range <- qs[5] - qs[1]
-  out <- data.frame(t(qs), IQR, CrI.range, check.names = FALSE)
+  CrIR <- qs[5] - qs[1]
+  out <- data.frame(t(qs), IQR, CrIR, check.names = FALSE)
   return(out)
 }

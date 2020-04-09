@@ -1,0 +1,218 @@
+---
+title: "01-B-BHM-Simstudy-ORR-report"
+author: "Sandro Gsteiger"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  word_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 7
+    highlight: 'default'
+    reference_docx: word_template.docx
+    toc: yes
+    toc_depth: 4
+  # html_document:
+  #   toc: true
+  #   toc_float: true
+  #   number_sections: true
+  # editor_options: 
+  #   chunk_output_type: console
+knit: (function(inputFile, encoding) {rmarkdown::render(inputFile, encoding = encoding, output_dir = "outputs")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+rm(list = ls())
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+for(s in dir("R")){
+  source(file.path(".", "R", s))
+}
+
+# load data generated with the simulation script
+sim_files <- c("01-B-global_par.RData",
+               "01-B-res.RData",
+               "01-B-scenario-grid.RData")
+for(s in sim_files){
+  load(file = paste("outputs/", s, sep = ""))  
+}
+```
+
+# Description
+Simulation study to assess the predictive uncertainty in a binary endpoint analyzed with a Bayesian hierarchical model as a function of number of groups and sample size per group.
+
+How perform different design choices (number of groups, size of groups, larger lead group or not)?
+
+What about the analysis model (HN(sigma=1), HN(sigma=0.5), or U(0,5) prior)?
+
+# Simulation setup and scenarios 
+
+## Defining and interpreting true levels of heterogeneity
+
+Assume the true population event rate is $p_0$ and the between-tissue-heterogeneity is $\tau$. Let $p_i$ be the true rate for tissue $i$ and $\theta_i = \textrm{logit}(p_i)$. The random effects model assumes exchangeability on the logit scale, this means
+$$ \theta_i \sim N(\theta_0, \tau^2).$$
+
+The range of true tissue specific event rates $p_i$ as well as threshold probabilities will depend on $\tau$.
+
+__Figure__ 95% and 50% ranges of tissue specific event rates as a function of heterogeneity (random effects SD)
+```{r}
+# calculate the prediction intervals as a function of the re.sd
+p.pop <- 0.5
+re.sd <- matrix(seq(0, 5, 0.1), nrow = 1)
+q <- matrix(qnorm(c(0.025, 0.25, 0.75, 0.975), 0, 1), ncol = 1)
+theta_mat <- q %*% re.sd
+p_mat <- boot::inv.logit(theta_mat)
+row.names(p_mat) <- c("PrIlo", "Q1", "Q3", "PrIup")
+dhet <- data.frame(re.sd = t(re.sd),
+                   t(p_mat)
+                   )
+dhet_l <- gather(dhet, 
+                 key = "key", 
+                 value = "value", "PrIlo", "Q1", "Q3", "PrIup", -re.sd)
+
+diqr <- dhet %>% 
+  filter(re.sd <= 1) %>%
+  select(re.sd, Q1, Q3)
+
+dpri <- dhet %>% 
+  filter(re.sd <= 1) %>%
+  select(re.sd, PrIlo, PrIup)
+
+
+# make the plot
+fig <- ggplot() +
+  geom_line(data = dhet_l %>% filter(key %in% c("Q1", "Q3")), aes(re.sd, value, group = key), linetype = "dashed") +
+  geom_line(data = dhet_l %>% filter(key %in% c("PrIlo", "PrIup")), aes(re.sd, value, group = key), linetype = "dotted") +
+  geom_linerange(data = dpri, aes(x = re.sd, ymin = PrIlo, ymax = PrIup), size = 1) +
+  geom_linerange(data = diqr, aes(x = re.sd, ymin = Q1, ymax = Q3), size = 2) +
+  theme_bw() +
+  scale_x_continuous(limits = c(0, 1.01), breaks = seq(0, 1, 0.1), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1), expand = c(0, 0)) +
+  ylab("Event probability") +
+  xlab("Random effects SD")
+fig
+
+rm(fig)
+```
+
+__Figure__ idem (alternative version)
+```{r}
+fig <- ggplot(data = dhet, aes(x = re.sd)) +
+  geom_ribbon(aes(ymin = PrIlo, ymax = PrIup), fill = "grey60", alpha = 0.5) +
+  geom_ribbon(aes(ymin = Q1, ymax = Q3), fill = "grey40") +
+  geom_linerange(aes(ymin = PrIlo, ymax = PrIup), size = 1) +
+  geom_linerange(aes(ymin = Q1, ymax = Q3), size = 2) +
+  theme_bw() +
+  scale_x_continuous(limits = c(0, 1.01), breaks = seq(0, 1, 0.1), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1), expand = c(0, 0)) +
+  ylab("Event probability") +
+  xlab("Random effects SD")
+fig
+
+rm(fig)
+```
+
+
+
+__Table__ 95% and 50% ranges of tissue specific event rates for selected levels of heterogeneity (random effects SD) as well as probability of being below 0.3
+```{r, results='asis'}
+dsum <- round(data.frame(dhet[c(2, 4, 8),],
+                   "P(p.new<0.3)" = pnorm((boot::logit(0.3) - boot::logit(p.pop)) / c(0.1, 0.3, 0.7), mean = 0, sd = 1), check.names = FALSE), 2)
+pander::pandoc.table(dsum, row.names = FALSE, split.tables = Inf, justify = "left")
+```
+
+
+__Figure__ 50% prediction intervals (dark grey) and 95% prediction intervals (light grey) for true tissue specific event probabilities as a function of RE SD
+```{r}
+fig <- ggplot(data = dhet, aes(x = re.sd)) +
+  geom_ribbon(aes(ymin = PrIlo, ymax = PrIup), fill = "grey60", alpha = 0.5) +
+  geom_ribbon(aes(ymin = Q1, ymax = Q3), fill = "grey40") +
+  geom_linerange(data = dhet %>% filter(re.sd %in% seq(0.5, 4.5, 0.5)), 
+                 aes(ymin = PrIlo, ymax = PrIup), size = 1) +
+  geom_linerange(data = dhet %>% filter(re.sd %in% seq(0.5, 4.5, 0.5)),
+                 aes(ymin = Q1, ymax = Q3), size = 2) +
+  scale_x_continuous(limits = c(0, 5.05), breaks = seq(0, 5, 0.5), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2), expand = c(0, 0)) +
+  ylab("Event probability") +
+  xlab("Random effects SD") +
+  theme_bw()
+fig
+```
+
+
+__Figure__ 50% prediction intervals (dark grey) and 95% prediction intervals (light grey) for true tissue specific event probabilities as a function of RE SD along wtih different prior distributions
+```{r}
+# -> reuse fig from above and combine w figure below
+
+# uniform prior
+u_0_5  <- function(x){0.2}
+hn_1   <- function(x){2 * dnorm(x, 0, 1)}
+hn_0.5 <- function(x){2 * dnorm(x, 0, 0.5)}
+
+dprior <- data.frame(x = seq(0, 5, 0.1)) %>%
+  mutate("U(0,5)" = u_0_5(x),
+         "HN(0.5)"= hn_0.5(x),
+         "HN(1)"   = hn_1(x)) %>%
+  gather(Prior, Density, 2:4)
+
+fig1 <- ggplot(data = dprior, aes(x = x, y = Density)) +
+  geom_area(aes(fill = Prior, linetype = Prior), 
+            colour = 1, alpha = 0.5, position = "identity") +
+  scale_x_continuous(limits = c(0, 5.05), breaks = seq(0, 5, 0.5), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 2), breaks = seq(0, 2, 0.5), expand = c(0, 0)) +
+  xlab("Random effects SD") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+fig1
+
+egg::ggarrange(fig, fig1, ncol = 1)
+
+rm(fig0, fig1)
+```
+
+
+
+## Simulation scenarios
+```{r, echo=TRUE}
+# True rate and heterogeneity
+bin_grid 
+
+# Sample sizes of lead group and subsequent groups
+size_grid
+
+# Number of groups
+grp_grid
+
+# Analysis priors (RE SD)
+prior_grid
+
+# Resulting full scenario grid
+dim(full_grid)
+head(full_grid)
+tail(full_grid)
+```
+
+## Global parameters
+```{r, echo=TRUE}
+global_par
+```
+
+
+
+# Simulation results
+
+```{r}
+
+```
+
+
+
+# Session info
+```{r}
+getwd()
+sessionInfo()
+```
