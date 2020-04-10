@@ -33,7 +33,7 @@ for(s in dir("R")){
   source(file.path(".", "R", s))
 }
 
-# load data generated with the simulation script
+# load outputs generated with the simulation script
 sim_files <- c("01-B-global_par.RData",
                "01-B-res.RData",
                "01-B-scenario-grid.RData")
@@ -42,16 +42,16 @@ for(s in sim_files){
 }
 ```
 
-# Description
+# Introduction
+
+## General description
 Simulation study to assess the predictive uncertainty in a binary endpoint analyzed with a Bayesian hierarchical model as a function of number of groups and sample size per group.
 
 How perform different design choices (number of groups, size of groups, larger lead group or not)?
 
 What about the analysis model (HN(sigma=1), HN(sigma=0.5), or U(0,5) prior)?
 
-# Simulation setup and scenarios 
-
-## Defining and interpreting true levels of heterogeneity
+## Defining and interpreting true levels of heterogeneity - how to define a meaningful (analysis) prior for the RE SD?
 
 Assume the true population event rate is $p_0$ and the between-tissue-heterogeneity is $\tau$. Let $p_i$ be the true rate for tissue $i$ and $\theta_i = \textrm{logit}(p_i)$. The random effects model assumes exchangeability on the logit scale, this means
 $$ \theta_i \sim N(\theta_0, \tau^2).$$
@@ -120,10 +120,22 @@ rm(fig)
 
 __Table__ 95% and 50% ranges of tissue specific event rates for selected levels of heterogeneity (random effects SD) as well as probability of being below 0.3
 ```{r, results='asis'}
-dsum <- round(data.frame(dhet[c(2, 4, 8),],
-                   "P(p.new<0.3)" = pnorm((boot::logit(0.3) - boot::logit(p.pop)) / c(0.1, 0.3, 0.7), mean = 0, sd = 1), check.names = FALSE), 2)
+vnear <- function(x, y){
+  all <- outer(x, y, FUN = near)
+  out <- apply(all, MAR = 1, FUN = any)
+  return(out)
+}
+thres <- global_par$p.threshold
+taus <- unique(res$re.sd)
+lab <- paste("P(p.new<", thres, ")", sep = "")
+dsum <- round(data.frame(
+  dhet[vnear(dhet$re.sd, taus),],
+  pnorm((boot::logit(thres) - boot::logit(p.pop)) / taus, mean = 0, sd = 1), check.names = FALSE), 2)
+colnames(dsum)[ncol(dsum)] <- lab
+  
 pander::pandoc.table(dsum, row.names = FALSE, split.tables = Inf, justify = "left")
 ```
+
 
 
 __Figure__ 50% prediction intervals (dark grey) and 95% prediction intervals (light grey) for true tissue specific event probabilities as a function of RE SD
@@ -171,12 +183,13 @@ fig1
 
 egg::ggarrange(fig, fig1, ncol = 1)
 
-rm(fig0, fig1)
+rm(fig, fig1)
 ```
 
-
+# Simulation settings 
 
 ## Simulation scenarios
+Simulations were run over the full grid of combinations below.
 ```{r, echo=TRUE}
 # True rate and heterogeneity
 bin_grid 
@@ -202,12 +215,98 @@ global_par
 ```
 
 
-
 # Simulation results
 
 ```{r}
+# combine scenario characteristics with sim results for analysis
+res <- res %>%
+  left_join(data.frame(scenario = 1:nrow(full_grid),
+                       full_grid),
+            by = "scenario") %>%
+  mutate(n.tot = lead.grp.size + (n.grp - 1) * subseq.grp.size) %>%
+  mutate(n_first = lead.grp.size, n_others = subseq.grp.size) # nicer labels
+
+dim(res)
+head(res)
+tail(res)
+```
+
+
+## Estimating between-study-heterogeneity (RE SD)
+
+### Posterior median RE SD ($\tau$)
+
+__Figure__ Posterior median of $\tau$ (mean over `n global_par$n_sim` simulations)
+```{r}
+dat <- res %>%
+  filter(node == "re.sd", var1 == "50%") %>%
+  filter(var2 == "mean") 
+
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_hline(aes(yintercept = s), linetype = "dashed") +
+    geom_line(aes(x = n.grp, y = value, color = dist)) +
+    facet_grid(n_first ~ n_others, labeller = label_both) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Number of groups") + 
+    ylab(expression(Mean~tau~estimate)) +
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top") 
+  print(fig)
+  rm(fig)
+}
+```
+
+
+**Mean Squared Error (MSE)** of the posterior median as an estimator for $\tau$, 
+$$MSE = Var + bias^2.$$
+__Figure__ MSE of the posterior median RE SD
+```{r}
+dat <- res %>%
+  filter(node == "re.sd", var1 == "50%") %>%
+  filter(var2 %in% c("mean", "sd")) %>%
+  spread(var2, value) %>%
+  mutate(MSE = sd^2 + (mean - re.sd)^2)
+
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_line(aes(x = n.grp, y = MSE, color = dist)) +
+    facet_grid(n_first ~ n_others, labeller = label_both) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Number of groups") + 
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top")
+  print(fig)
+  rm(fig)
+}
+```
+
+
+## Predictive uncertainty: new tissue response rate
+
+
+--- HERE ---
+
+__Figure__ Length of 95% prediction interval of new group event probability (mean over `n global_par$n_sim` simulations)
+```{r}
 
 ```
+
+
+__Figure__ Inter-quartile range of prediction interval of new group event probability (mean over `n global_par$n_sim` simulations)
+```{r}
+
+```
+
+__Figure__ Estimated posterior probability of new group event probability being lower than `r global_par$p.threshold`, P(p.new<`r global_par$p.threshold`)  (mean over `n global_par$n_sim` simulations)
+```{r}
+
+```
+
+
+
+
+
 
 
 

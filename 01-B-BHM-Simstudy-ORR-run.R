@@ -46,7 +46,7 @@ prefix <- "01-B-"
 # True rate and heterogeneity
 bin_pars <- list(
   p.pop = 0.5,
-  re.sd = 0.1 # c(0.1, 0.3, 0.7)
+  re.sd = c(0.1, 0.3, 0.7)
 )
 
 bin_grid <- expand.grid(bin_pars)
@@ -54,8 +54,8 @@ bin_grid <- expand.grid(bin_pars)
 # Size of lead group and of subsequent groups: scenarios with larger lead group
 size_pars1 <- list(
   lead.grp = c("yes"),
-  lead.grp.size = 10, # c(10, 20),
-  subseq.grp.size = c(2, 10) # c(2, 5, 10, 20)
+  lead.grp.size = c(10, 20),
+  subseq.grp.size = c(2, 5, 10, 20)
 )
 
 size_grid1 <- expand.grid(size_pars1) %>% 
@@ -64,8 +64,8 @@ size_grid1 <- expand.grid(size_pars1) %>%
 # Size of lead group and of subsequent groups: scenarios without larger lead group
 size_grid2 <- data.frame(
   lead.grp = c("no"),
-  lead.grp.size = c(2, 10), # c(2, 5, 10, 20),
-  subseq.grp.size = c(2, 10), # c(2, 5, 10, 20),
+  lead.grp.size = c(2, 5, 10, 20),
+  subseq.grp.size = c(2, 5, 10, 20),
   stringsAsFactors = FALSE
 ) 
 
@@ -76,7 +76,7 @@ grp_grid <- data.frame(n.grp = c(5:10, 15, 20))
 
 # heterogeneity priors
 prior_grid <- data.frame(
-  dist = c("U(0,5)", "HN(0.5)"), # c("U(0,5)", "HN(0.5)", "HN(1)"),
+  dist = c("U(0,5)", "HN(0.5)", "HN(1)"),
   stringsAsFactors = FALSE
 )
 
@@ -100,10 +100,10 @@ save(bin_grid, size_grid, grp_grid, prior_grid, full_grid,
 ## -----------------------------------------------------
 
 global_par <- list(
-  n_sim = 5,
+  n_sim = 1000,
   n_chains = 3,
-  n_iter =  5000,
-  n_burnin = 1000,
+  n_iter =  12000,
+  n_burnin = 2000,
   n_thin = 1,
   p.threshold = 0.3
 )
@@ -126,7 +126,7 @@ res <- data.frame(matrix(NA, nrow = 15 * 6 * nrow(full_grid), ncol = 5,
 
 ## run simulations
 for(i in 1:nrow(full_grid)){ # outer loop: scenarios
-  cat("Scenario ", i, "\n")
+  cat("Scenario ", i, " / ", nrow(full_grid), "\n")
   scen_i <- full_grid[i, ]
   
   sim_i <- data.frame(matrix(NA, ncol = 4, nrow = 15 * global_par$n_sim, 
@@ -185,7 +185,8 @@ dim(res)
 head(res)
 tail(res)
 
-# save for analysis in reporting script
+
+# save for use in reporting script
 save(res, 
      file = paste("outputs/", prefix, "res", ".RData", sep = ""))
 
