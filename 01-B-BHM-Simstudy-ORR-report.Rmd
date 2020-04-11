@@ -40,6 +40,14 @@ sim_files <- c("01-B-global_par.RData",
 for(s in sim_files){
   load(file = paste("outputs/", s, sep = ""))  
 }
+
+# combine scenario characteristics with sim results for analysis
+res <- res %>%
+  left_join(data.frame(scenario = 1:nrow(full_grid),
+                       full_grid),
+            by = "scenario") %>%
+  mutate(n.tot = lead.grp.size + (n.grp - 1) * subseq.grp.size) %>%
+  mutate(n_first = lead.grp.size, n_others = subseq.grp.size) # nicer labels
 ```
 
 # Introduction
@@ -127,7 +135,7 @@ vnear <- function(x, y){
 }
 thres <- global_par$p.threshold
 taus <- unique(res$re.sd)
-lab <- paste("P(p.new<", thres, ")", sep = "")
+lab <- paste("ProbBelow", thres, sep = "")
 dsum <- round(data.frame(
   dhet[vnear(dhet$re.sd, taus),],
   pnorm((boot::logit(thres) - boot::logit(p.pop)) / taus, mean = 0, sd = 1), check.names = FALSE), 2)
@@ -179,7 +187,6 @@ fig1 <- ggplot(data = dprior, aes(x = x, y = Density)) +
   xlab("Random effects SD") +
   theme_bw() +
   theme(legend.position = "bottom")
-fig1
 
 egg::ggarrange(fig, fig1, ncol = 1)
 
@@ -209,6 +216,7 @@ head(full_grid)
 tail(full_grid)
 ```
 
+
 ## Global parameters
 ```{r, echo=TRUE}
 global_par
@@ -217,15 +225,8 @@ global_par
 
 # Simulation results
 
+Dimension, first and last few lines of results data frame.
 ```{r}
-# combine scenario characteristics with sim results for analysis
-res <- res %>%
-  left_join(data.frame(scenario = 1:nrow(full_grid),
-                       full_grid),
-            by = "scenario") %>%
-  mutate(n.tot = lead.grp.size + (n.grp - 1) * subseq.grp.size) %>%
-  mutate(n_first = lead.grp.size, n_others = subseq.grp.size) # nicer labels
-
 dim(res)
 head(res)
 tail(res)
@@ -246,7 +247,7 @@ for(s in unique(dat$re.sd)){
   fig <- ggplot(data = dat %>% filter(re.sd == s)) +
     geom_hline(aes(yintercept = s), linetype = "dashed") +
     geom_line(aes(x = n.grp, y = value, color = dist)) +
-    facet_grid(n_first ~ n_others, labeller = label_both) +
+    facet_grid(n_others ~ n_first, labeller = label_both) +
     ggtitle(bquote(tau==.(s))) +
     xlab("Number of groups") + 
     ylab(expression(Mean~tau~estimate)) +
@@ -255,6 +256,7 @@ for(s in unique(dat$re.sd)){
   print(fig)
   rm(fig)
 }
+rm(dat)
 ```
 
 
@@ -271,7 +273,7 @@ dat <- res %>%
 for(s in unique(dat$re.sd)){
   fig <- ggplot(data = dat %>% filter(re.sd == s)) +
     geom_line(aes(x = n.grp, y = MSE, color = dist)) +
-    facet_grid(n_first ~ n_others, labeller = label_both) +
+    facet_grid(n_others ~ n_first, labeller = label_both) +
     ggtitle(bquote(tau==.(s))) +
     xlab("Number of groups") + 
     theme_bw() +
@@ -279,33 +281,93 @@ for(s in unique(dat$re.sd)){
   print(fig)
   rm(fig)
 }
+rm(dat)
 ```
 
 
 ## Predictive uncertainty: new tissue response rate
 
+```{r}
+# calculate true range of 95% CrI and IQR
+dsum <- dsum %>%
+  mutate(IQR = Q3 - Q1, PrIR = PrIup - PrIlo)
+```
 
---- HERE ---
 
 __Figure__ Length of 95% prediction interval of new group event probability (mean over `n global_par$n_sim` simulations)
 ```{r}
+dat <- res %>%
+  filter(node == "p.new", var1 == "CrIR") %>%
+  filter(var2 %in% c("mean"))
 
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_hline(data = dsum %>% filter(re.sd == s), aes(yintercept = PrIR), linetype = "dashed") +
+    geom_line(aes(x = n.grp, y = value, color = dist)) +
+    facet_grid(n_others ~ n_first, labeller = label_both) +
+    ylim(0, 1) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Number of groups") + 
+    ylab("Length of 95% PrI") +
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top")
+  print(fig)
+  rm(fig)
+}
+
+rm(dat)
 ```
 
 
 __Figure__ Inter-quartile range of prediction interval of new group event probability (mean over `n global_par$n_sim` simulations)
 ```{r}
+dat <- res %>%
+  filter(node == "p.new", var1 == "IQR") %>%
+  filter(var2 %in% c("mean"))
 
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_hline(data = dsum %>% filter(re.sd == s), aes(yintercept = IQR), linetype = "dashed") +
+    geom_line(aes(x = n.grp, y = value, color = dist)) +
+    facet_grid(n_others ~ n_first, labeller = label_both) +
+    ylim(0, 1) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Number of groups") + 
+    ylab("IQR") +
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top")
+  print(fig)
+  rm(fig)
+}
+
+rm(dat)
 ```
 
 __Figure__ Estimated posterior probability of new group event probability being lower than `r global_par$p.threshold`, P(p.new<`r global_par$p.threshold`)  (mean over `n global_par$n_sim` simulations)
 ```{r}
+dat <- res %>%
+  filter(node == "p.new", var1 == "ProbAbove0.3") %>%
+  filter(var2 %in% c("mean")) %>%
+  mutate(value = 1 - value)
+
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_hline(data = dsum %>% filter(re.sd == s), aes(yintercept = ProbBelow0.3), linetype = "dashed") +
+    geom_line(aes(x = n.grp, y = value, color = dist)) +
+    facet_grid(n_others ~ n_first, labeller = label_both) +
+    ylim(0, 1) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Number of groups") + 
+    ylab("P(p.new<0.3)") +
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top")
+  print(fig)
+  rm(fig)
+}
+
+rm(dat)
 
 ```
-
-
-
-
 
 
 
