@@ -146,8 +146,9 @@ pander::pandoc.table(dsum, row.names = FALSE, split.tables = Inf, justify = "lef
 
 
 
-__Figure__ 50% prediction intervals (dark grey) and 95% prediction intervals (light grey) for true tissue specific event probabilities as a function of RE SD
+__Figure__ 50% prediction intervals (dark grey) and 95% prediction intervals (light grey) for true tissue specific event probabilities as a function of RE SD along wtih different prior distributions
 ```{r}
+# predicted event rates (ranges)
 fig <- ggplot(data = dhet, aes(x = re.sd)) +
   geom_ribbon(aes(ymin = PrIlo, ymax = PrIup), fill = "grey60", alpha = 0.5) +
   geom_ribbon(aes(ymin = Q1, ymax = Q3), fill = "grey40") +
@@ -160,15 +161,8 @@ fig <- ggplot(data = dhet, aes(x = re.sd)) +
   ylab("Event probability") +
   xlab("Random effects SD") +
   theme_bw()
-fig
-```
 
-
-__Figure__ 50% prediction intervals (dark grey) and 95% prediction intervals (light grey) for true tissue specific event probabilities as a function of RE SD along wtih different prior distributions
-```{r}
-# -> reuse fig from above and combine w figure below
-
-# uniform prior
+# different heterogeneity priors prior
 u_0_5  <- function(x){0.2}
 hn_1   <- function(x){2 * dnorm(x, 0, 1)}
 hn_0.5 <- function(x){2 * dnorm(x, 0, 0.5)}
@@ -237,8 +231,8 @@ tail(res)
 
 ### Posterior median RE SD ($\tau$)
 
-__Figure__ Posterior median of $\tau$ (mean over `n global_par$n_sim` simulations)
-```{r}
+__Figure__ Posterior median of $\tau$ (mean over `r global_par$n_sim` simulations)
+```{r, fig.height=7}
 dat <- res %>%
   filter(node == "re.sd", var1 == "50%") %>%
   filter(var2 == "mean") 
@@ -260,10 +254,12 @@ rm(dat)
 ```
 
 
+### Mean Squared Error
+
 **Mean Squared Error (MSE)** of the posterior median as an estimator for $\tau$, 
 $$MSE = Var + bias^2.$$
 __Figure__ MSE of the posterior median RE SD
-```{r}
+```{r, fig.height=7}
 dat <- res %>%
   filter(node == "re.sd", var1 == "50%") %>%
   filter(var2 %in% c("mean", "sd")) %>%
@@ -287,6 +283,8 @@ rm(dat)
 
 ## Predictive uncertainty: new tissue response rate
 
+### 95% Prediction interval
+
 ```{r}
 # calculate true range of 95% CrI and IQR
 dsum <- dsum %>%
@@ -294,8 +292,8 @@ dsum <- dsum %>%
 ```
 
 
-__Figure__ Length of 95% prediction interval of new group event probability (mean over `n global_par$n_sim` simulations)
-```{r}
+__Figure__ Length of 95% prediction interval of new group event probability (mean over `r global_par$n_sim` simulations)
+```{r, fig.height=7}
 dat <- res %>%
   filter(node == "p.new", var1 == "CrIR") %>%
   filter(var2 %in% c("mean"))
@@ -319,8 +317,10 @@ rm(dat)
 ```
 
 
-__Figure__ Inter-quartile range of prediction interval of new group event probability (mean over `n global_par$n_sim` simulations)
-```{r}
+### Interquartile range
+
+__Figure__ Inter-quartile range of prediction interval of new group event probability (mean over `r global_par$n_sim` simulations)
+```{r, fig.height=7}
 dat <- res %>%
   filter(node == "p.new", var1 == "IQR") %>%
   filter(var2 %in% c("mean"))
@@ -330,7 +330,7 @@ for(s in unique(dat$re.sd)){
     geom_hline(data = dsum %>% filter(re.sd == s), aes(yintercept = IQR), linetype = "dashed") +
     geom_line(aes(x = n.grp, y = value, color = dist)) +
     facet_grid(n_others ~ n_first, labeller = label_both) +
-    ylim(0, 1) +
+    ylim(0, 0.6) +
     ggtitle(bquote(tau==.(s))) +
     xlab("Number of groups") + 
     ylab("IQR") +
@@ -343,8 +343,11 @@ for(s in unique(dat$re.sd)){
 rm(dat)
 ```
 
-__Figure__ Estimated posterior probability of new group event probability being lower than `r global_par$p.threshold`, P(p.new<`r global_par$p.threshold`)  (mean over `n global_par$n_sim` simulations)
-```{r}
+
+### Threshold probabilities
+
+__Figure__ Estimated posterior probability of new group event probability being lower than `r global_par$p.threshold`, P(p.new<`r global_par$p.threshold`)  (mean over `r global_par$n_sim` simulations)
+```{r, fig.height=7}
 dat <- res %>%
   filter(node == "p.new", var1 == "ProbAbove0.3") %>%
   filter(var2 %in% c("mean")) %>%
@@ -355,7 +358,7 @@ for(s in unique(dat$re.sd)){
     geom_hline(data = dsum %>% filter(re.sd == s), aes(yintercept = ProbBelow0.3), linetype = "dashed") +
     geom_line(aes(x = n.grp, y = value, color = dist)) +
     facet_grid(n_others ~ n_first, labeller = label_both) +
-    ylim(0, 1) +
+    ylim(0, 0.4) +
     ggtitle(bquote(tau==.(s))) +
     xlab("Number of groups") + 
     ylab("P(p.new<0.3)") +

@@ -54,7 +54,7 @@ bin_grid <- expand.grid(bin_pars)
 # Size of lead group and of subsequent groups: scenarios with larger lead group
 size_pars1 <- list(
   lead.grp = c("yes"),
-  lead.grp.size = c(10, 20),
+  lead.grp.size = 20,
   subseq.grp.size = c(2, 5, 10, 20)
 )
 
@@ -72,7 +72,7 @@ size_grid2 <- data.frame(
 size_grid <- rbind(size_grid1, size_grid2)
 
 # number of tissue types (groups)
-grp_grid <- data.frame(n.grp = c(5:10, 15, 20))
+grp_grid <- data.frame(n.grp = c(5, 7, 10, 15, 20))
 
 # heterogeneity priors
 prior_grid <- data.frame(
@@ -100,10 +100,10 @@ save(bin_grid, size_grid, grp_grid, prior_grid, full_grid,
 ## -----------------------------------------------------
 
 global_par <- list(
-  n_sim = 1000,
+  n_sim = 500,
   n_chains = 3,
-  n_iter =  12000,
-  n_burnin = 2000,
+  n_iter =  6000,
+  n_burnin = 1000,
   n_thin = 1,
   p.threshold = 0.3
 )
@@ -136,7 +136,7 @@ for(i in 1:nrow(full_grid)){ # outer loop: scenarios
     model_i <- "models/bin_abs_re_hn.jgmod"
     prior_i <- list(prior.fe.mean = boot::logit(0.3), prior.fe.prec = 1/10,
                     prior.re.mean = get_prior(scen_i$dist)$par1, 
-                    prior.re.prec = get_prior(scen_i$dist)$par2)
+                    prior.re.prec = 1 / (get_prior(scen_i$dist)$par2)^2 )
   }
   if (get_prior(scen_i$dist)$dist == "U"){
     model_i <- "models/bin_abs_re_unif.jgmod"
@@ -146,7 +146,7 @@ for(i in 1:nrow(full_grid)){ # outer loop: scenarios
   }
   
   for(j in 1:global_par$n_sim){ # inner loop: n_sim iterations per scenario
-    cat(".")
+    cat(".\n")
     sink(file = "temp.sink.txt") # sink R2jags model summary (as no quiet mode)
     sim_ij <- simstd_bin(par.sim = list(p.pop = scen_i$p.pop, 
                                         re.sd = scen_i$re.sd, 
