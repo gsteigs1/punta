@@ -280,10 +280,36 @@ for(s in unique(dat$re.sd)){
   rm(fig)
 }
 
-rm(dat)
-
 ```
 
+#### Compare impact of group size vs number of groups
+
+__Figure__ Threshold probability as a function of total sample size. The panels give the subsequent group size (the first group has always a size of 5).
+```{r, fig.height = 4}
+dat <- res %>%
+  filter(node == "p.new", var1 == "ProbAbove0.3") %>%
+  filter(var2 %in% c("mean")) %>%
+  mutate(value = 1 - value)
+
+for(s in unique(dat$re.sd)){
+  for(p in unique(dat$dist)){
+    fig <- ggplot(data = dat %>% filter(re.sd == s, dist == p)) +
+      geom_hline(data = dsum %>% filter(re.sd == s), 
+                 aes(yintercept = ProbBelow0.3), linetype = "dashed") +
+      geom_line(aes(x = n.tot, y = value)) +
+      facet_grid(.~n_others) +
+      ylim(0, 0.4) +
+      ggtitle(bquote(tau==.(s)), subtitle = p) +
+      xlab("Total sample size") + 
+      ylab("P(p.new<0.3)") +
+      theme_bw() +
+      theme(legend.position = "top")
+    print(fig)
+    rm(fig)
+  }
+}
+
+```
 
 
 
