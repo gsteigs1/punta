@@ -1,7 +1,7 @@
 # ***************************************************** #
 # Title: 01-B2-BHM-Simstudy-ORR-run                     #
 # Author: Sandro Gsteiger                               #
-# Description: similar to 01-B2-BHM-Simstudy-ORR-run    #
+# Description: similar to 01-B-BHM-Simstudy-ORR-run     #
 #              additional scenarios with very small     #
 #               data sets                               #
 #                                                       #

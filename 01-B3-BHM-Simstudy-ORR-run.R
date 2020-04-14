@@ -1,18 +1,9 @@
 # ***************************************************** #
-# Title: 01-B-BHM-Simstudy-ORR-run                      #
+# Title: 01-B3-BHM-Simstudy-ORR-run                     #
 # Author: Sandro Gsteiger                               #
-# Description: Simulation study to assess impact of:    #
-#              - different design options/sample sizes  #
-#                (number of groups, size of groups)     #
-#              - different RE SD priors                 #
-#              on predictive uncertainty.               #
-#              Hypothetical setup with binary data.     #
-#                                                       #
-# This script runs the simulations. The file            #
-#  01-B-BHM-Simstudy-ORR-report.Rmd                     #
-# reads in the output and reports the results.          #
-#                                                       #
-# Working directory must be project main directory.     #
+# Description: similar to 01-B2-BHM-Simstudy-ORR-run    #
+#              additional scenarios to compare impact   #
+#              of number of groups/total sample size    #
 # ***************************************************** #
 
 # ======================================================
@@ -33,7 +24,7 @@ for(s in dir("R")){
 r_seed <- 8945334
 
 # start all output with this
-prefix <- "01-B-" 
+prefix <- "01-B3-" 
 
 # ======================================================
 # *** Simulation scenarios ***
@@ -46,7 +37,7 @@ prefix <- "01-B-"
 # True rate and heterogeneity
 bin_pars <- list(
   p.pop = 0.5,
-  re.sd = c(0.1, 0.3, 0.7)
+  re.sd = c(0.3, 0.7)
 )
 
 bin_grid <- expand.grid(bin_pars)
@@ -54,8 +45,8 @@ bin_grid <- expand.grid(bin_pars)
 # Size of lead group and of subsequent groups: scenarios with larger lead group
 size_pars1 <- list(
   lead.grp = c("yes"),
-  lead.grp.size = 20,
-  subseq.grp.size = c(2, 5, 10, 20)
+  lead.grp.size = 5,
+  subseq.grp.size = c(2:5)
 )
 
 size_grid1 <- expand.grid(size_pars1) %>% 
@@ -64,15 +55,26 @@ size_grid1 <- expand.grid(size_pars1) %>%
 # Size of lead group and of subsequent groups: scenarios without larger lead group
 size_grid2 <- data.frame(
   lead.grp = c("no"),
-  lead.grp.size = c(2, 5, 10, 20),
-  subseq.grp.size = c(2, 5, 10, 20),
+  lead.grp.size = c(5),
+  subseq.grp.size = c(5),
   stringsAsFactors = FALSE
 ) 
 
 size_grid <- rbind(size_grid1, size_grid2)
 
 # number of tissue types (groups)
-grp_grid <- data.frame(n.grp = c(5, 7, 10, 15, 20))
+grp_grid1 <- data.frame(n.grp = c(8, 12, 16, 19)) # for subseq n=2
+grp_grid2 <- data.frame(n.grp = c(6, 10, 13))     #            n=3
+grp_grid3 <- data.frame(n.grp = c(5, 7, 10))      #            n=4
+grp_grid4 <- data.frame(n.grp = seq(4, 8, 2))     #            n=5
+
+sample_grid <- rbind(size_grid[1,] %>% crossing(grp_grid1),
+                     size_grid[2,] %>% crossing(grp_grid2),
+                     size_grid[3,] %>% crossing(grp_grid3),
+                     size_grid[4,] %>% crossing(grp_grid4))
+
+sample_grid %>% mutate(n.tot = lead.grp.size + (n.grp - 1) * subseq.grp.size) # check
+
 
 # heterogeneity priors
 prior_grid <- data.frame(
@@ -82,8 +84,7 @@ prior_grid <- data.frame(
 
 # construct the full grid of all simulation scenarios
 full_grid <- bin_grid %>%
-  crossing(size_grid) %>%
-  crossing(grp_grid) %>%
+  crossing(sample_grid) %>%
   crossing(prior_grid)
   
 dim(full_grid)
@@ -91,7 +92,7 @@ head(full_grid)
 tail(full_grid)
 
 # save to include in report
-save(bin_grid, size_grid, grp_grid, prior_grid, full_grid, 
+save(bin_grid, size_grid, sample_grid, prior_grid, full_grid, 
      file = paste("outputs/", prefix, "scenario-grid", ".RData", sep = ""))
 
 
@@ -102,7 +103,7 @@ save(bin_grid, size_grid, grp_grid, prior_grid, full_grid,
 global_par <- list(
   n_sim = 500,
   n_chains = 3,
-  n_iter =  6000,
+  n_iter =  11000,
   n_burnin = 1000,
   n_thin = 1,
   p.threshold = 0.3
