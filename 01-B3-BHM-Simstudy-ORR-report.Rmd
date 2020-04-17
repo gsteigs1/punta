@@ -160,6 +160,25 @@ for(s in unique(dat$re.sd)){
   print(fig)
   rm(fig)
 }
+```
+
+
+
+__Figure__  Posterior median of $\tau$ (mean over `r global_par$n_sim` simulations) as a function of the total sample size
+```{r}
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_hline(aes(yintercept = s), linetype = "dashed") +
+    geom_line(aes(x = n.tot, y = value, color = dist)) +
+    facet_grid(n_first ~ n_others, labeller = label_both) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Total sample size") + 
+    ylab(expression(Mean~tau~estimate)) +
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top") 
+  print(fig)
+  rm(fig)
+}
 rm(dat)
 ```
 
@@ -168,7 +187,7 @@ rm(dat)
 
 **Mean Squared Error (MSE)** of the posterior median as an estimator for $\tau$, 
 $$MSE = Var + bias^2.$$
-__Figure__ MSE of the posterior median RE SD
+__Figure__ MSE of the posterior median RE SD as a function of the number of groups
 ```{r, fig.height=7}
 dat <- res %>%
   filter(node == "re.sd", var1 == "50%") %>%
@@ -182,6 +201,22 @@ for(s in unique(dat$re.sd)){
     facet_grid(n_others ~ n_first, labeller = label_both) +
     ggtitle(bquote(tau==.(s))) +
     xlab("Number of groups") + 
+    theme_bw() +
+    theme(legend.title = element_blank(), legend.position = "top")
+  print(fig)
+  rm(fig)
+}
+```
+
+
+__Figure__ MSE of the posterior median RE SD as a function of the total sample size
+```{r}
+for(s in unique(dat$re.sd)){
+  fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+    geom_line(aes(x = n.tot, y = MSE, color = dist)) +
+    facet_grid(n_first ~ n_others, labeller = label_both) +
+    ggtitle(bquote(tau==.(s))) +
+    xlab("Total sample size") + 
     theme_bw() +
     theme(legend.title = element_blank(), legend.position = "top")
   print(fig)
@@ -309,6 +344,25 @@ for(s in unique(dat$re.sd)){
 
 ```
 
+__Figure__ idem (alternative plot)
+```{r, fig.height = 4}
+for(s in unique(dat$re.sd)){
+    fig <- ggplot(data = dat %>% filter(re.sd == s)) +
+      geom_hline(data = dsum %>% filter(re.sd == s), 
+                 aes(yintercept = ProbBelow0.3), linetype = "dashed") +
+      geom_line(aes(x = n.tot, y = value, color = dist)) +
+      facet_grid(.~n_others) +
+      ylim(0, 0.4) +
+      ggtitle(bquote(tau==.(s))) +
+      xlab("Total sample size") + 
+      ylab("P(p.new<0.3)") +
+      theme_bw() +
+      theme(legend.position = "top", legend.title = element_blank())
+    print(fig)
+    rm(fig)
+}
+rm(dat)
+```
 
 
 # Session info
