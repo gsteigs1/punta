@@ -1,0 +1,277 @@
+---
+title: "02-A-EDA-TTE-Larotrectinib"
+author: "Sandro Gsteiger"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  word_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 7
+    highlight: 'default'
+    reference_docx: word_template.docx
+    toc: yes
+    toc_depth: 4
+  # html_document:
+  #   toc: true
+  #   toc_float: true
+  #   number_sections: true
+  # editor_options: 
+  #   chunk_output_type: console
+knit: (function(inputFile, encoding) {rmarkdown::render(inputFile, encoding = encoding, output_dir = "outputs")})
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE)
+options(tibble.width = Inf)
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# for(s in dir("R")){
+#   source(file.path(".", "R", s))
+# }
+# 
+# r_seed <- 8945334
+
+```
+
+# Description
+
+Exploratory data analysis for Larotrectinib OS/PFS data reported in G-BA Modul 4. The results here will serve to select realistic values in the stylized decision model later on used for VoI analysis. But the VoI case study will be for a stylized decision model and will not reflect any real data.
+
+# Exponential survival model 
+The OS/PFS data from Larotrectinib used in the G-BA dossier are not mature yet and also the reporting is limited. 
+For both endpoints, 12-months survival rates are given. The simplest standard survival model uses the exponential distribution. The rate paramter $\lambda$ can be derived from the landmark survival probability since
+$$ S(t) = e^{-\lambda t}. $$
+This implies that a monthly rate estiamte is $\hat\lambda = -\log(\hat S(12))/12.$ 
+
+```{r}
+dtte <- read_excel("data/Larotrectinib-TTE.xlsx", sheet = "G-BA_clean")
+dtte
+```
+
+
+**12-months survival probabilities, yearly rates, and expected mean survival (in years)**
+
+_OS data_
+```{r}
+dos <- dtte %>%
+  select(1, n, OS_12month, OS_12month_CIlo, OS_12month_CIup) %>%
+  slice(15) %>%
+  mutate(rate     = -log(OS_12month),
+         rate_lo  = -log(OS_12month_CIup),
+         rate_up  = -log(OS_12month_CIlo),
+         mean    = 1/rate,
+         mean_lo = 1/rate_up,
+         mean_up = 1/rate_lo)
+dos
+```
+
+
+
+_PFS data_
+```{r}
+dpfs <- dtte %>%
+  select(1, n, PFS_12month, PFS_12month_CIlo, PFS_12month_CIup) %>%
+  slice(15) %>%
+  mutate(rate     = -log(PFS_12month),
+         rate_lo  = -log(PFS_12month_CIup),
+         rate_up  = -log(PFS_12month_CIlo),
+         mean    = 1/rate,
+         mean_lo = 1/rate_up,
+         mean_up = 1/rate_lo)
+
+dpfs
+```
+
+
+**Figure** Exponential survival models for Larotrectinib estimated from 12-months survival rates for OS (black line/area) and PFS (blue line/area).
+
+__Figure__ OS and PFS survival probabilities from exponential model fits (long-term extrapolation)
+```{r}
+dexp <- data.frame(x = seq(0, 30, 0.1)) %>%
+  mutate(OS     = exp(-x * dos$rate),
+         OS_lo  = exp(-x * dos$rate_up),
+         OS_up  = exp(-x * dos$rate_lo),
+         PFS    = exp(-x * dpfs$rate),
+         PFS_lo = exp(-x * dpfs$rate_up),
+         PFS_up = exp(-x * dpfs$rate_lo))
+
+# dexpl <- dexp %>%
+#   gather("var", "value", -x)
+
+fig <- ggplot(data = dexp, aes(x = x)) +
+  geom_ribbon(aes(ymin = OS_lo, ymax = OS_up), fill = "grey75") +
+  geom_ribbon(aes(ymin = PFS_lo, ymax = PFS_up), fill = "lightblue") +
+  geom_line(aes(y = OS), lwd = 1.5) +
+  geom_line(aes(y = PFS), color = "darkblue", lwd = 1.5) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  xlab("Years") +
+  ylab("Survival probability") +
+  theme_bw()
+fig
+
+fig +
+  scale_x_continuous(expand = c(0, 0), limits = c(0, 4)) +
+  scale_y_continuous(expand = c(0, 0))
+
+rm(fig)
+```
+
+__Table__ OS and PFS survival probabilities from exponential model fits
+```{r, results='asis'}
+pander::pandoc.table(dexp %>% filter(x %in% seq(5, 30, 5)), 
+                     row.names = FALSE, split.tables = Inf, digits = 3)
+```
+
+
+OS seems rather on the long end, though this seems to reflect the potential of a cured subgroup (with relatively early age of onset). For the sake of the example here, these estimates might be "good enough" (?) to serve as rough guides for selecting values for a stylized decision model.
+
+For the stylized example we may need to select much smaller uncertainty around the population average to be able to study the effect of adding prediction uncertainty. Otherwise the "initial" uncertainty may be too large to make meaningful case studies.
+
+Test also the Weibull model, which may proof more suitable.
+
+# Weibull model
+I fit the Weibull survival model,
+$$ S(t) = e^{-\lambda t^\gamma} $$
+
+to two data points (t, S(t)), with time **t in years** to derive the shape parameter $\gamma$ and the scale parameter $\lambda$.
+
+For this purpose, I add the (arbitrary) tail constraint of OS at 20 years being 1%. 
+```{r}
+t1 <- 1
+S1 <- dos$OS_12month
+
+t2 <- 20
+S2 <- 0.01
+```
+
+Solving the survivor function equation for the two points.
+```{r, results='asis'}
+x1 <- log(t1)
+x2 <- log(t2)
+y1 <- log(-log(S1))
+y2 <- log(-log(S2))
+
+shape <- (y2 - y1) / (x2 - x1) 
+os_scale <- exp(y2 - shape * x2)
+```
+
+I assume the _shape parameter is fixed and the same between OS and PFS and the same for both treatments (i.e. the same throughout)_. This has the (additional) advantage that the hazard curves are time-changing, but the hazard ratios between new and reference treatment are not. This means the hazard-ratio for new treatment $B$ vs reference treatment $A$ is, under the assumptions above, given by the ratios of scale parameters,
+$$ \textrm{HR}_{AB} = \frac{\lambda_B}{\lambda_A} . $$
+
+
+To derive a CI for the scale parameter, I solve the equation again (now with one single parameter) and plug-in the lower and upper values from the 12-month OS estimates.
+
+```{r}
+S1_lo <- dos$OS_12month_CIlo
+S1_up <- dos$OS_12month_CIup
+
+os_scale_lo <- exp(log(-log(S1_up)) - shape * x1)
+os_scale_up <- exp(log(-log(S1_lo)) - shape * x1)
+```
+
+This leads to:
+```{r, results='asis'}
+pander::pandoc.table(data.frame(t1, S1, S1_lo, S1_up, t2, S2, 
+                                shape, os_scale, os_scale_lo, os_scale_up), 
+                     row.names = FALSE, split.tables = Inf, digits = 3)
+```
+
+
+Redo the "same"" for PFS: take the shape parameter from above, derive scale from the 12-months landmark PFS values.
+```{r, results='asis'}
+S1    <- dpfs$PFS_12month
+S1_lo <- dpfs$PFS_12month_CIlo
+S1_up <- dpfs$PFS_12month_CIup
+
+pfs_scale    <- exp(log(-log(S1))    - shape * x1)
+pfs_scale_lo <- exp(log(-log(S1_up)) - shape * x1)
+pfs_scale_up <- exp(log(-log(S1_lo)) - shape * x1)
+
+pander::pandoc.table(data.frame(t1, S1, S1_lo, S1_up, 
+                                shape, pfs_scale, pfs_scale_lo, pfs_scale_up), 
+                     row.names = FALSE, split.tables = Inf, digits = 3)
+```
+
+
+
+Resulting Weibull survivor function along with point-wise CI.
+
+
+__Figure__ OS and PFS survival probabilities from exponential model fits (long-term extrapolation)
+```{r}
+dwb <- data.frame(x = seq(0, 30, 1)) %>%
+  mutate(OS      = exp(-os_scale * x ^ shape),
+         OS_lo   = exp(-os_scale_up * x ^ shape),
+         OS_up   = exp(-os_scale_lo * x ^ shape),
+         PFS     = exp(-pfs_scale * x ^ shape),
+         PFS_lo  = exp(-pfs_scale_up * x ^ shape),
+         PFS_up  = exp(-pfs_scale_lo * x ^ shape)
+         )
+
+fig <- ggplot(data = dwb, aes(x = x)) +
+  geom_ribbon(aes(ymin = OS_lo, ymax = OS_up), fill = "grey75") +
+  geom_ribbon(aes(ymin = PFS_lo, ymax = PFS_up), fill = "lightblue") +
+  geom_line(aes(y = OS), lwd = 1.5) +
+  geom_line(aes(y = PFS), color = "darkblue", lwd = 1.5) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  xlab("Years") +
+  ylab("Survival probability") +
+  theme_bw()
+fig
+
+fig +
+  scale_x_continuous(expand = c(0, 0), limits = c(0, 20)) +
+  scale_y_continuous(expand = c(0, 0))
+
+fig +
+  scale_x_continuous(expand = c(0, 0), limits = c(0, 4)) +
+  scale_y_continuous(expand = c(0, 0))
+
+rm(fig)
+```
+
+
+__Table__ OS and PFS survival probabilities from Weibull model fits
+```{r, results='asis'}
+pander::pandoc.table(dwb %>% filter(x %in% seq(5, 30, 5)), 
+                     row.names = FALSE, split.tables = Inf, digits = 3)
+```
+
+
+**Transforming between time scales**
+Shape and scale parameters (defined as per the Weibull model at the beginning of the section) were derived using time in years. For different time units, e.g. months, the transformation is as follows:
+
+* Shape $\gamma$ is time-invariant and does not change.
+* Scale in months ($\lambda_m$) from scale in years ($\lambda_y$):
+
+$$ \lambda_m = \lambda_y / 12^\gamma $$
+
+In this case, we get:
+```{r, echo=TRUE}
+# OS scale in months
+os_scale / 12 ^ shape
+os_scale_lo / 12 ^ shape
+os_scale_up / 12 ^ shape
+
+
+# PFS scale in months
+pfs_scale / 12 ^ shape
+pfs_scale_lo / 12 ^ shape
+pfs_scale_up / 12 ^ shape
+```
+
+
+
+# Session info
+```{r}
+getwd()
+sessionInfo()
+```

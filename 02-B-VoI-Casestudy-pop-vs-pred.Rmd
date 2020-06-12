@@ -1,0 +1,520 @@
+---
+title: "02-B-VoI-Casestudy-pop-vs-pred"
+author: "Sandro Gsteiger"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  word_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 7
+    highlight: 'default'
+    reference_docx: word_template.docx
+    toc: yes
+    toc_depth: 4
+  # html_document:
+  #   toc: true
+  #   toc_float: true
+  #   number_sections: true
+  # editor_options: 
+  #   chunk_output_type: console
+knit: (function(inputFile, encoding) {rmarkdown::render(inputFile, encoding = encoding, output_dir = "outputs")})
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+
+knitr::opts_chunk$set(echo = FALSE)
+options(tibble.width = Inf)
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(BCEA)
+
+for(s in dir("R")){
+  source(file.path(".", "R", s))
+}
+
+r_seed <- 3947623
+set.seed(r_seed)
+```
+
+# Description
+Use very simple, stylized desision model to assess the relevance of predictive uncertainty with tumour agnostic therapies.
+
+Compare EVPI and EVPPI for two decision rules:
+
+1. Use the population estimates for decision making.
+2. Use the predicted outcomes in a new tissue in the decision rule.
+
+
+# Stylized decision model
+
+Partitioned survival model.
+
+Weibull model for OS and PFS, shape parameter assumed the same. Shape parameter estimated from Larotrectinib OS data. Scale paramters (with uncertainty) estimated from Larotrectinib 12-months survival data (OS and PFS).
+
+Assessment of impact of predictive uncertainty (new tissue type).
+
+Implementation by adapting functions publically available from DARTH group
+(https://github.com/DARTH-git/Partitioned-Survival-Analysis).
+
+
+# Base case analysis
+
+## Model inputs
+
+* Baseline survival rates (new treatment): OS and PFS rates and their standard errors roughly taken from Laro data 
+* Hazard ratios to obtain comparator group: assumptions (set to obtain "workable" model for case study, i.e. new intervention reasonnable likelihood of being cost effective)
+* Utilities: assumptions based on from lit
+  * Pre-pog: smal diff. between treatments
+  * Post-progression: 
+    + no difference between the two groups
+    + this was the preferred assumption by the NICE committee in the Laro dossier
+    + the manufacturer and some clinical experts said difference in post-prog. utility were plausible
+* Costs:
+  * New trt, pre-prog: 
+    * per pERC report about 20k CAN $ per month; -> 12k GBP
+    * per NICE ACM2: list price GBP 15k per month (then confidential discount)
+  * Ref trt, pre-prog: per pERC about 2k CAN $, though extreme between tissue variability
+  * Post-progression state (indep. of trt); assumption
+* Discount rate: 3.5% for costs and outcomes per NHS/NICE recommendation
+* Time-horizon: 30 years.
+
+
+Note that _time scale_ is _years_.
+
+```{r, echo=TRUE}
+model_pars <- list(
+  shape       = 1.2,
+  OS_scale  = 0.128,      
+  PFS_scale = 0.446,
+  HR_OS       = 0.3,
+  HR_PFS      = 0.3,
+  u_pre_trt   = 0.8,      # utility in pre-progrsssion state, new treatment
+  u_pre_ref   = 0.6,      # idem, reference treatment
+  u_post      = 0.45,     # utility, post-progression state
+  u_death     = 0,
+  c_pre_trt   =  2500,    # costs in pre-progrsssion state per cycle, new treatment
+  c_pre_ref   =  1000,    # idem, reference treatment
+  c_post      =   300,    # costs per cycle, post-progression state
+  c_death     =     0     
+)
+
+model_settings <- list(
+  state_names    = c("Pre-progression", "Post-progression", "Death"),
+  horizon        = 30,
+  cycle_length   = 1 / 12,  # cycle length 1-month (time scale: years) 
+  disc_rate      = 0.035    # rate per year
+)
+```
+
+
+## Economic evaluation
+
+```{r}
+# Calculate the Markov traces
+t_eval <- seq(0, model_settings$horizon, by = model_settings$cycle_length) # time scale: years
+
+pars_trt <- list(
+  scale.os  = model_pars$OS_scale,
+  scale.pfs = model_pars$PFS_scale,
+  shape     = model_pars$shape
+)
+
+trace_trt <- get_partsurv(t_eval, pars_trt)
+
+pars_ref <- list(
+  scale.os  = model_pars$OS_scale * (1 / model_pars$HR_OS),
+  scale.pfs = model_pars$PFS_scale * (1 / model_pars$HR_PFS),
+  shape     = model_pars$shape
+)
+
+trace_ref <- get_partsurv(t_eval, pars_ref)
+```
+
+
+**Figure** Markov traces (base case analysis)
+```{r}
+trace_trt2 <- trace_trt %>%
+  mutate(time = t_eval) %>%
+  gather("State", "Proportion", -time)
+
+trace_ref2 <- trace_ref %>%
+  mutate(time = t_eval) %>%
+  gather("State", "Proportion", -time)
+
+ggplot(data = trace_trt2) +
+  geom_line(aes(time, Proportion, color = State, linetype = State)) +
+  xlab("Years") +
+  ggtitle("New treatment") +
+  xlim(0, 20) +
+  theme_bw()
+
+ggplot(data = trace_ref2) +
+  geom_line(aes(time, Proportion, color = State, linetype = State)) +
+  xlab("Years") +
+  ggtitle("Reference treatment") +
+  xlim(0, 20) +
+  theme_bw()
+```
+
+
+
+Calculate total discounted costs and QALYs for the new and the reference treatments.
+```{r}
+ee_trt <- get_ee(t_eval, 
+                 trace_trt,
+                 costs_per_cycle = c(model_pars$c_pre_trt, model_pars$c_post, model_pars$c_death),
+                 utils = c(model_pars$u_pre_trt, model_pars$u_post, model_pars$u_death),
+                 dr = model_settings$disc_rate,
+                 cycle_length = model_settings$cycle_length
+                 )
+
+ee_ref <- get_ee(t_eval, 
+                 trace_ref,
+                 costs_per_cycle = c(model_pars$c_pre_ref, model_pars$c_post, model_pars$c_death),
+                 utils = c(model_pars$u_pre_ref, model_pars$u_post, model_pars$u_death),
+                 dr = model_settings$disc_rate,
+                 cycle_length = model_settings$cycle_length
+                 )
+
+```
+
+** Model outputs (base case)**
+```{r, echo=TRUE}
+## new treatment
+ee_trt
+
+## ref treatment
+ee_ref
+
+
+## incremental costs and QALYs
+delta <- ee_trt - ee_ref
+delta
+
+## ICER
+ICER <- c(costs.per.QALY = delta[[1]] / delta[[2]])
+ICER
+```
+
+
+# PSA: population model
+
+## Run the PSA and plot the cost-effectiveness plane
+Summaries of distributions used for parameter uncertainty.
+```{r, echo=TRUE}
+# OS_scale parameter, new trt:
+qnorm(mean = 0.128, sd = (0.211 - 0.0513)/6, p = c(0.025, 0.975))
+
+# PFS_scale parameter, new trt:
+qnorm(mean = 0.446, sd = (0.635 - 0.288)/6, p = c(0.025, 0.975))
+
+# HR OS, PFS ~ Beta(30, 70) => Expectation: 3/10
+qbeta(30, 70, p = c(0.025, 0.975))
+
+# costs pre-progression state new treatment
+# median: 2500
+qlnorm(meanlog = log(2500), sdlog = 0.05, p = c(0.025, 0.975))
+
+# costs pre-progression state ref treatment
+# median: 1000
+qlnorm(meanlog = log(1000), sdlog = 0.05, p = c(0.025, 0.975))
+
+```
+
+
+```{r}
+n_sim <- 1000
+
+model_psa <- matrix(NA, ncol = (length(model_pars) + 7), nrow = n_sim)
+colnames(model_psa) <- c(names(model_pars), 
+                         "costs.trt", "QALYs.trt", "costs.ref", "QALYs.ref", 
+                         "dCost", "dQALY", "ICER")
+for(i in 1:n_sim){
+  model_psa[i, "shape"]    <- model_pars$shape
+  model_psa[i, "OS_scale"] <- rnorm(1, mean = 0.128, sd = (0.211 - 0.0513)/6)
+  model_psa[i, "PFS_scale"]<- rnorm(1, mean = 0.446, sd = (0.635 - 0.288)/6)
+  model_psa[i, "HR_OS"]    <- rbeta(1, shape1 = 30, shape2 = 70)
+  model_psa[i, "HR_PFS"]   <- rbeta(1, shape1 = 30, shape2 = 70)
+  model_psa[i, "u_pre_trt"]<- runif(1, 0.75, 0.85)
+  model_psa[i, "u_pre_ref"]<- runif(1, 0.55, 0.65)
+  model_psa[i, "u_post"]   <- runif(1, 0.4, 0.5)
+  model_psa[i, "u_death"]  <- model_pars$u_death
+  model_psa[i, "c_pre_trt"]<- rlnorm(1, meanlog = log(2500), sdlog = 0.05)
+  model_psa[i, "c_pre_ref"]<- rlnorm(1, meanlog = log(1000), sdlog = 0.05)
+  model_psa[i, "c_post"]   <- model_pars$c_post
+  model_psa[i, "c_death"]   <- model_pars$c_death
+
+  # Calculate the Markov traces
+  pars_trt_i <- list(
+    scale.os  = model_psa[i, "OS_scale"],
+    scale.pfs = model_psa[i, "PFS_scale"],
+    shape     = model_psa[i, "shape"]
+  )
+  trace_trt_i <- get_partsurv(t_eval, pars_trt_i)
+
+  pars_ref_i <- list(
+    scale.os  = model_psa[i, "OS_scale"] * (1 / model_psa[i, "HR_OS"]),
+    scale.pfs = model_psa[i, "PFS_scale"]* (1 / model_psa[i, "HR_PFS"]),
+    shape     = model_psa[i, "shape"]
+  )
+  trace_ref_i <- get_partsurv(t_eval, pars_ref_i)
+
+  # Do the economic evaluation
+  ee_trt_i <- get_ee(t_eval, 
+                   trace_trt_i,
+                   costs_per_cycle = model_psa[i, c("c_pre_trt", "c_post", "c_death")],
+                   utils           = model_psa[i, c("u_pre_trt", "u_post", "u_death")],
+                   dr              = model_settings$disc_rate,
+                   cycle_length    = model_settings$cycle_length
+  )
+  
+  ee_ref_i <- get_ee(t_eval, 
+                     trace_ref_i,
+                     costs_per_cycle = model_psa[i, c("c_pre_ref", "c_post", "c_death")],
+                     utils           = model_psa[i, c("u_pre_ref", "u_post", "u_death")],
+                     dr              = model_settings$disc_rate,
+                     cycle_length    = model_settings$cycle_length
+  )
+  
+  # Store results
+  model_psa[i, c("costs.trt", "QALYs.trt")] <- ee_trt_i
+  model_psa[i, c("costs.ref", "QALYs.ref")] <- ee_ref_i
+  model_psa[i, c("dCost", "dQALY")]         <- ee_trt_i - ee_ref_i
+  model_psa[i, c("ICER")]                   <- model_psa[[i, "dCost"]] / model_psa[[i, "dQALY"]]
+}
+
+ggplot(data = as.data.frame(model_psa)) +
+  geom_point(aes(dQALY, dCost), shape = 1) +
+  geom_point(data = as.data.frame(t(delta)), 
+             aes(total.QALYs, total.costs), col = "red") +
+  geom_hline(yintercept = 0, lwd = 1.5) +
+  geom_vline(xintercept = 0, lwd = 1.5) +
+  geom_abline(intercept = 0, slope = 30000, linetype = "dashed") +
+  scale_x_continuous(limits = c(-1, 5), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(-30000, 120000), 
+                     breaks = seq(-30000, 120000, 15000), expand = c(0, 0)) +
+  theme_bw()
+```
+
+
+## Summarize PSA outputs and (re)analyze the PSA outputs with the BCEA package
+```{r, echo=TRUE}
+# PSA outputs
+e <- model_psa[, c("QALYs.trt", "QALYs.ref")] # ref in bcea terminology is our trt!!
+c <- model_psa[, c("costs.trt", "costs.ref")] # caution to this !!
+me <- apply(e, MAR = 2, FUN = mean)
+me
+mc <- apply(c, MAR = 2, FUN = mean)
+mc
+
+diff(mc) / diff(me)
+
+# Compare with basecase analysis
+ee_trt
+ee_ref
+delta
+ICER
+
+
+# re-analyze with bcea
+res <- bcea(e, c, interventions = c("ref", "trt"), 
+            Kmax = 80000, wtp = seq(0, 80000, 2000))
+
+summary.bcea(res, wtp = 30000)
+```
+
+```{r}
+plot(res, wtp = 30000)
+```
+
+## Calculate EVPPI
+```{r}
+par(mfrow = c(1,1))
+# tte pars
+voi <- evppi(c("HR_OS", "HR_PFS"), model_psa, res)
+plot(voi)
+
+voi <- evppi(c("OS_scale", "PFS_scale"), model_psa, res)
+plot(voi)
+
+
+# costs
+voi <- evppi(c("c_pre_trt", "c_pre_ref"), model_psa, res)
+plot(voi)
+
+# utils
+voi <- evppi(c("u_pre_trt", "u_pre_ref"), model_psa, res)
+plot(voi)
+```
+
+
+# Redo PSA, but for predictive distribution (new tissue)
+
+Add predictive uncertainty wrt HRs, and costs.
+
+Keep the baseline model (which per se would be expected to vary too!).
+
+## Run the PSA and plot the cost-effectiveness plane
+Summaries of distributions used for parameter uncertainty. In particular with respect to reference treatment.
+```{r, echo=TRUE}
+# HR OS, PFS ~ Beta(1.5, 3.5) => Expectation: 3/10, but very uncertain
+qbeta(1.5, 3.5, p = c(0.025, 0.975))
+
+# costs pre-progression state new treatment
+# median: 2500
+qlnorm(meanlog = log(2500), sdlog = 0.3, p = c(0.025, 0.25, 0.75, 0.975))
+
+# costs pre-progression state ref treatment
+# median: 1000
+qlnorm(meanlog = log(1000), sdlog = 0.75, p = c(0.025, 0.25, 0.75, 0.975))
+
+```
+
+
+```{r}
+set.seed(r_seed)
+n_sim <- 1000
+
+model_psa2 <- matrix(NA, ncol = (length(model_pars) + 7), nrow = n_sim)
+colnames(model_psa2) <- c(names(model_pars), 
+                         "costs.trt", "QALYs.trt", "costs.ref", "QALYs.ref", 
+                         "dCost", "dQALY", "ICER")
+for(i in 1:n_sim){
+  model_psa2[i, "shape"]    <- model_pars$shape
+  model_psa2[i, "OS_scale"] <- rnorm(1, mean = 0.128, sd = (0.211 - 0.0513)/6)
+  model_psa2[i, "PFS_scale"]<- rnorm(1, mean = 0.446, sd = (0.635 - 0.288)/6)
+  model_psa2[i, "HR_OS"]    <- rbeta(1, shape1 = 1.5, shape2 = 3.5)
+  model_psa2[i, "HR_PFS"]   <- rbeta(1, shape1 = 1.5, shape2 = 3.5)
+  model_psa2[i, "u_pre_trt"]<- runif(1, 0.75, 0.85)
+  model_psa2[i, "u_pre_ref"]<- runif(1, 0.55, 0.65)
+  model_psa2[i, "u_post"]   <- runif(1, 0.4, 0.5)
+  model_psa2[i, "u_death"]  <- model_pars$u_death
+  model_psa2[i, "c_pre_trt"]<- rlnorm(1, meanlog = log(2500), sdlog = 0.3)
+  model_psa2[i, "c_pre_ref"]<- rlnorm(1, meanlog = log(1000), sdlog = 0.8)
+  model_psa2[i, "c_post"]   <- model_pars$c_post
+  model_psa2[i, "c_death"]   <- model_pars$c_death
+
+  # Calculate the Markov traces
+  pars_trt_i <- list(
+    scale.os  = model_psa2[i, "OS_scale"],
+    scale.pfs = model_psa2[i, "PFS_scale"],
+    shape     = model_psa2[i, "shape"]
+  )
+  trace_trt_i <- get_partsurv(t_eval, pars_trt_i)
+
+  pars_ref_i <- list(
+    scale.os  = model_psa2[i, "OS_scale"] * (1 / model_psa2[i, "HR_OS"]),
+    scale.pfs = model_psa2[i, "PFS_scale"]* (1 / model_psa2[i, "HR_PFS"]),
+    shape     = model_psa2[i, "shape"]
+  )
+  trace_ref_i <- get_partsurv(t_eval, pars_ref_i)
+
+  # Do the economic evaluation
+  ee_trt_i <- get_ee(t_eval, 
+                   trace_trt_i,
+                   costs_per_cycle = model_psa2[i, c("c_pre_trt", "c_post", "c_death")],
+                   utils           = model_psa2[i, c("u_pre_trt", "u_post", "u_death")],
+                   dr              = model_settings$disc_rate,
+                   cycle_length    = model_settings$cycle_length
+  )
+  
+  ee_ref_i <- get_ee(t_eval, 
+                     trace_ref_i,
+                     costs_per_cycle = model_psa2[i, c("c_pre_ref", "c_post", "c_death")],
+                     utils           = model_psa2[i, c("u_pre_ref", "u_post", "u_death")],
+                     dr              = model_settings$disc_rate,
+                     cycle_length    = model_settings$cycle_length
+  )
+  
+  # Store results
+  model_psa2[i, c("costs.trt", "QALYs.trt")] <- ee_trt_i
+  model_psa2[i, c("costs.ref", "QALYs.ref")] <- ee_ref_i
+  model_psa2[i, c("dCost", "dQALY")]         <- ee_trt_i - ee_ref_i
+  model_psa2[i, c("ICER")]                   <- model_psa2[[i, "dCost"]] / model_psa2[[i, "dQALY"]]
+}
+
+ggplot(data = as.data.frame(model_psa2)) +
+  geom_point(aes(dQALY, dCost), shape = 1) +
+  geom_point(data = as.data.frame(t(delta)), 
+             aes(total.QALYs, total.costs), col = "red") +
+  geom_hline(yintercept = 0, lwd = 1.5) +
+  geom_vline(xintercept = 0, lwd = 1.5) +
+  geom_abline(intercept = 0, slope = 30000, linetype = "dashed") +
+  scale_x_continuous(limits = c(-1, 5), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(-30000, 120000), 
+                     breaks = seq(-30000, 120000, 15000), expand = c(0, 0)) +
+  theme_bw()
+```
+
+
+## Summarize PSA outputs and (re)analyze the PSA outputs with the BCEA package
+```{r, echo=TRUE}
+# PSA outputs
+e2 <- model_psa2[, c("QALYs.trt", "QALYs.ref")] # ref in bcea terminology is our trt!!
+c2 <- model_psa2[, c("costs.trt", "costs.ref")] # caution to this !!
+me2 <- apply(e2, MAR = 2, FUN = mean)
+me2
+mc2 <- apply(c2, MAR = 2, FUN = mean)
+mc2
+
+diff(mc2) / diff(me2)
+
+# Compare with basecase analysis
+ee_trt
+ee_ref
+delta
+ICER
+
+
+# re-analyze with bcea
+res2 <- bcea(e2, c2, interventions = c("ref", "trt"), 
+            Kmax = 80000, wtp = seq(0, 80000, 2000))
+
+summary.bcea(res2, wtp = 30000)
+```
+
+```{r}
+plot(res2, wtp = 30000)
+```
+
+
+## Calculate EVPPI
+```{r}
+par(mfrow = c(1,1))
+# tte pars
+voi2 <- evppi(c("HR_OS", "HR_PFS"), model_psa2, res2)
+plot(voi2)
+
+voi2 <- evppi(c("OS_scale", "PFS_scale"), model_psa2, res2)
+plot(voi2)
+
+
+# costs
+voi2 <- evppi(c("c_pre_trt", "c_pre_ref"), model_psa2, res2)
+plot(voi2)
+
+# utils
+voi2 <- evppi(c("u_pre_trt", "u_pre_ref"), model_psa2, res2)
+plot(voi2)
+```
+
+
+
+# misc 
+
+* Correlation from Michiels et al (2017)
+* Heterogeneity: Turner prior
+* Heterogeneity: half the Turner prior
+
+
+
+# Session info
+```{r}
+getwd()
+sessionInfo()
+```
+
