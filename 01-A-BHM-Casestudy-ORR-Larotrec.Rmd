@@ -1198,7 +1198,7 @@ pander::pandoc.table(post_all, row.names = FALSE, split.tables = Inf, justify = 
 
 
 
-__Table__ Compare input data sets
+(__Table__ Compare input data sets)
 ```{r, results='asis'}
 
 # number of tissues
@@ -1207,6 +1207,401 @@ __Table__ Compare input data sets
 # naive pool: obs rate and CI
   
 ```
+
+
+# Cumulative meta-analysis
+## Background
+Assess the impact of adding tissues with very low sample size. Intuitively, one would expect that as more and more tissue types become available, the data becomes more and more informative. However, by adding tissues with very small group size one may actually introduce more heterogeneity (as suggested by SA1 and SA2). 
+
+Illustrate this by doing a cumulative MA and studying the range of the predictive distribution.
+
+Use the U(0, 5) prior from the ERG - the least informative prior from the case study - since the objective is to assess estimability of $\tau$ from the data. Therefore use "as little prior information as possible".
+
+## Data and "procedure"
+
+Recall the ORR data used by the ERG.
+```{r}
+# ORR data used by ERG
+dorr_erg 
+```
+
+I will do a cumulative MA starting with the RE MA model fitted to the first 3 tissues (in the order given above), then to the first four, then five and so on.
+
+## Run the cumulative MA
+
+Global parameters for BHM.
+
+```{r, echo=TRUE}
+n_chains <- 3
+n_iter <- 30000 # 15000 # double the iterations since for initial fits data limited
+n_burnin <- 4000 # 2000
+n_thin <- 2 # 1
+```
+
+
+```{r, echo=FALSE}
+set.seed(r_seed)
+
+cma_fits <- list()
+
+for(i in 3:nrow(dorr_erg)){
+  dorr_erg_i <- dorr_erg[1:i,]
+  djags_i <- list(ns = nrow(dorr_erg_i),
+                  r = dorr_erg_i$x,
+                  n = dorr_erg_i$n)
+  
+  fit_re_i <- jags(data = c(djags_i, erg_priors),
+                   n.chains = n_chains,
+                   n.iter = n_iter,
+                   n.burnin = n_burnin,
+                   n.thin = n_thin,
+                   parameters = c(pars_fe, "re.sd"),
+                   inits = NULL,
+                   model.file = "models/bin_abs_re_unif.jgmod")
+  
+  cma_fits[[i-2]] <- fit_re_i
+  rm(fit_re_i)
+}
+```
+
+## Cumulative MA results
+
+### Posterior summaries of rates (population and new tissue) and of RE SD
+
+```{r}
+# Initialize data frames to store results
+cma_pnew <- as.data.frame(matrix(NA, # predictive distribution (response rate in new tissue)
+                                 nrow = nrow(dorr_erg) - 2, ncol = 11, 
+                                 dimnames = list(NULL, c("n_tissues", "n_tot", 
+                                                         "dn", "dr", 
+                                                         "2.5%",  "25%",   "50%",   "75%",   "97.5%",
+                                                         "IQR",   "CrIR"))),
+                          
+                          check.names = FALSE)
+cma_ppop <- cma_pnew                 # population response rate
+
+cma_resd <- as.data.frame(matrix(NA, # random effect SD (tau)
+                                 nrow = nrow(dorr_erg) - 2, ncol = 8, 
+                                 dimnames = list(NULL, c("n_tissues", "n_tot", 
+                                                         "dn", "dr",
+                                                         "mean", "sd",
+                                                         "IQR",   "CrIR"))),
+                          
+                          check.names = FALSE)
+
+
+for (i in 1:length(cma_fits)){
+  fit_re_i <- cma_fits[[i]]
+  dorr_erg_i <- dorr_erg[1:(i+2),]
+  dsums_i <- c(n_tissues = i+2,
+               n_tot = sum(dorr_erg_i$n),
+               dn    = tail(dorr_erg_i$n, 1),
+               dr    = tail(dorr_erg_i$x, 1)
+               #r_tot = sum(dorr_erg_i$x)
+               )
+  
+  
+  qts_pnew_i <- get_quantiles(fit_re_i, node = "p.new")
+  qts_ppop_i <- get_quantiles(fit_re_i, node = "p.pop")
+  qts_resd_i <- get_quantiles(fit_re_i, node = "re.sd")
+  psum_resd_i <- fit_re_i$BUGSoutput$summary["re.sd", c("mean", "sd")]
+  
+  cma_pnew[i,] <- c(dsums_i, qts_pnew_i) 
+  cma_ppop[i,] <- c(dsums_i, qts_ppop_i) 
+  cma_resd[i,] <- c(dsums_i, psum_resd_i, qts_resd_i[c("IQR", "CrIR")]) 
+ 
+  rm(fit_re_i, dorr_erg_i)
+}
+
+```
+
+
+__Table__ Cumulative MA results: posterior summaries p.new
+```{r, results='asis'}
+pander::pandoc.table(cma_pnew, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+
+__Table__ Cumulative MA results: posterior summaries p.pop
+```{r, results='asis'}
+pander::pandoc.table(cma_ppop, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+
+__Table__ Cumulative MA results: posterior summaries re.sd
+```{r, results='asis'}
+pander::pandoc.table(cma_resd, row.names = FALSE, split.tables = Inf, justify = "left", digits = 2)
+```
+
+Compare this with the U(0, 5) prior summaries:
+__Table__ Summaries of U(0,5) prior
+```{r, results='asis'}
+duprior <- data.frame(mean = 2.5,
+                      sd = sqrt(25/12),
+                      IQR = 2.5,
+                      CrIR = 4.75)
+
+pander::pandoc.table(duprior, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+### Shrinkage
+Exchangeability is assumed on the logit scale, therefore also shrinkage of the estimates should be calculated on the logit scale. For tissues no. 8 and 10 - 14 this is not possible since the observed rates are 0 or 1 and the shrinkage and shrinkage factors are not properly defined. Therefore, I calculate the shrinkage for the first seven tissues and show how it evolves in the cumulative MA. 
+
+#### Shrinkage factors
+I first use shrinkage factors to quantify shrinkage on a relative and therefore interpretable scale. 
+
+**Fully Bayesian version**
+Shrinkage factor:
+
+$$ \omega_i = \frac{\theta_i - y_i}{\mu - y_i } $$
+
+For each round in the cumulative MA, for each of the first seven tissue types (when available), calculate the full posterior of $\omega_i$ and derive posterior summaries (take the mean and the median).
+
+Shrinkage factor $\omega_i$ of 0 indicates no shrinkage to the population mean of the meta-analysis estimate for tissue $i$ (the BHM estimate stays at $y_i$, the estimate when considering this tissue in isolation). A shrinkage factor of 1 indicates complete shrinkage meaning the tissue specific estimate from the BHM model collapses with the population estimate.
+
+More shrinkage - larger values of omega - also mean more borrowing of information across tissues.
+
+Note that for some tissues, the observed rate may be close to the population estimate leading to denominator values close to zero in the calculation of the shrinkage factor. For some tissues, these factors using plug-in estimates may, therefore, be numerically unstable and depend for example on whether the posterior mean or median is taken as point estimate.
+
+Also, the population estimate $\hat\mu$ still evolves quite a lot in the cumulative MA where with start with three tissues only. Therefore the normalization is not really a "normalization constant", which makes interpretation not as straightforward as one may think.
+
+**Approximation using plug-in estimates**
+
+Shrinkage factor:
+$$ \hat\omega_i = \frac{\hat\theta_i - y_i}{\hat\mu - y_i } $$
+where
+$y_i$ the observed response rate in tissue $i$ on the logit scale;
+$\hat\theta_i$ a point estimate of the true response rate in tissue $i$ (on the logit scale);
+and $\mu$ the corresponding population estimate.
+
+Point estimates would typically be the posterior median or the posterior mean.
+
+
+#### Absolute shrinkage
+As seen, the shrinkage factors have two limitations:
+
+* Numerical issues due to some tissues having observed estimate close to the population mean.
+* Normalizing not with a constant.
+
+Therefore, I also assess the abolute shrinkage, defined as the difference between the observed rate and tissue specific rate estimate (both on the logit scale) from the MA:
+$$ \Omega_i = |\theta_i - y_i| $$
+
+Again, larger values show more shrinkage, i.e. more borrowing of information. Lower values mean less borrowing of information across tissues.
+
+This has the additional advantage that proper posterior summaries of $\Omega_i$ can be obtained via plug-in estimates given the piecewise linear structure.
+
+
+#### Results
+```{r}
+# extract the estimates (logit scale) for the first 7 tissues 
+#  for all MAs (where they exist)
+
+n_shrink <- 7
+n_skip <- 2
+n_cma <- length(cma_fits)
+
+dshrinkage <- data.frame()
+for(i in 1:n_cma){
+  
+  fit_re_i <- cma_fits[[i]]
+  est_pop_med_i <- fit_re_i$BUGSoutput$summary["mu", "50%"]
+  est_pop_mean_i <- fit_re_i$BUGSoutput$summary["mu", "mean"]
+  
+  for(j in 1:min(n_shrink, i + n_skip)){
+    #cat("i:", i, ", j:", j, "\n")
+    obs_j <- boot::logit(dorr_erg[[j, "orr"]])
+    type_j <- dorr_erg[[j, "Tumour type"]]
+    
+    name_j <- paste("theta[", j, "]", sep = "")
+    est_grp_med_ij <- fit_re_i$BUGSoutput$summary[name_j, "50%"]
+    est_grp_mean_ij <- fit_re_i$BUGSoutput$summary[name_j, "mean"]
+    
+    # shrinkage factors (plug-in)
+    shrinkage_med_ij <- (est_grp_med_ij - obs_j) / (est_pop_med_i - obs_j)
+    shrinkage_mean_ij <- (est_grp_mean_ij - obs_j) / (est_pop_mean_i - obs_j)
+    
+    
+    # shrinkage factors (fully Bayesian) 
+    srfB_ij <- get_shrinkage(fit_re_i,  node.pop = "mu", node.grp = "theta", id.grp = j)  
+
+    # absolute shrinkage
+    absshrinkage_med_ij <- abs(est_grp_med_ij - obs_j)
+    absshrinkage_mean_ij <- abs(est_grp_mean_ij - obs_j)
+    
+    
+    out_ij <- data.frame("cma_id" = i,
+                         "tissue_id" = j,
+                         "n_tissues" = i + n_skip, 
+                         "tissue"    = type_j,
+                         "srkf_med_ij" = shrinkage_med_ij,
+                         "srkf_mean_ij"= shrinkage_mean_ij,
+                         "srkf_B_med_ij" = srfB_ij[["median"]],
+                         "srkf_B_mean_ij"= srfB_ij[["mean"]],
+                         "asrk_med_ij" = absshrinkage_med_ij,
+                         "asrk_mean_ij"= absshrinkage_mean_ij,
+                         stringsAsFactors = FALSE)
+    
+    dshrinkage <- rbind(dshrinkage, out_ij)
+  }
+}
+```
+
+
+__Table__ Shrinkage results across the cumulative MA 
+```{r, results='asis'}
+pander::pandoc.table(dshrinkage, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+
+##### Shrinkage factors (approximate with plug-in estimates)
+
+_First seven tissues_
+
+__Figure__ Approximate shrinkage factors by tissue type (posterior median as plug-in estimate)
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = srkf_med_ij, color = tissue)) +
+  ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrinkage factor",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+```
+
+__Figure__ Approximate shrinkage factors by tissue type (posterior mean as plug-in estimate)
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = srkf_mean_ij, color = tissue)) +
+  ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrinkage factor",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+```
+
+Borrowing of information increases initially as more, relatively homogeneous tissues are added to the MA. 
+After reaching a peak, borrowing decreases again. Despite adding more tissues, the mutual sharing of information goes down since the (estimated) heterogeneity increases when adding small, low information tissues.
+
+_First three tissues (which can be followed all along the cumulative MA)_
+
+__Figure__ Approximate shrinkage factors by tissue type (posterior median as plug-in estimate)
+```{r}
+ggplot(data = dshrinkage %>% filter(tissue_id <=3)) +
+  geom_line(aes(x = n_tissues, y = srkf_med_ij, color = tissue)) +
+  ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrinkage factor",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+__Figure__ Approximate shrinkage factors by tissue type (posterior mean as plug-in estimate)
+```{r}
+ggplot(data = dshrinkage %>% filter(tissue_id <=3)) +
+  geom_line(aes(x = n_tissues, y = srkf_mean_ij, color = tissue)) +
+  ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrinkage factor",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+##### Shrinkage factors (fully Bayesian)
+
+_First seven tissues_
+
+__Figure__ Shrinkage factors by tissue type (posterior median)
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = srkf_B_med_ij, color = tissue)) +
+  ylim(0, 1) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrinkage factor",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+
+```
+Borrowing of information initially increases (larger shrinkage factor). But when adding the low information tissue types, borrowing of information across tissue types decreases again (shrinkage factor goes down).
+
+
+
+__Figure__ Approximate shrinkage factors by tissue type (posterior mean)
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = srkf_B_mean_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrinkage factor",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+-> the ratio in the shrinkage factor makes the calculation somewhat numerically unstable; posterior means cannot be used reliably
+
+
+
+
+##### Absolute shrinkage
+
+_First seven tissues_
+
+__Figure__ Absolute shrinkage (posterior medians)
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = asrk_med_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Absolute shrinkage",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+__Figure__ Absolute shrinkage (posterior means)
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = asrk_mean_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Absolute shrinkage",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+_First three tissues (which can be followed across the full cumulative MA)_
+
+__Figure__ Absolute shrinkage (posterior medians)
+```{r}
+ggplot(data = dshrinkage %>% filter(tissue_id <=3)) +
+  geom_line(aes(x = n_tissues, y = asrk_med_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Absolute shrinkage",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+__Figure__ Absolute shrinkage (posterior means)
+```{r}
+ggplot(data = dshrinkage %>% filter(tissue_id <=3)) +
+  geom_line(aes(x = n_tissues, y = asrk_mean_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Absolute shrinkage",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
 
 
 
