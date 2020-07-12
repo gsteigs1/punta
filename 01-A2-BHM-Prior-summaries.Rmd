@@ -1,0 +1,128 @@
+---
+title: "01-A2-BHM-prior-summaries"
+author: "Sandro Gsteiger"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output: 
+  word_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 7
+    highlight: 'default'
+    reference_docx: word_template.docx
+    toc: yes
+    toc_depth: 4
+  # html_document:
+  #   toc: true
+  #   toc_float: true
+  #   number_sections: true
+  # editor_options: 
+  #   chunk_output_type: console
+knit: (function(inputFile, encoding) {rmarkdown::render(inputFile, encoding = encoding, output_dir = "outputs")})
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+rm(list = ls())
+
+library(readxl)
+library(dplyr)
+library(reshape2)
+library(R2jags)
+library(ggplot2)
+
+for(s in dir("R")){
+  source(file.path(".", "R", s))
+}
+
+r_seed <- 8945334
+```
+
+# Description
+Calculate summary tables for heterogeneity priors.
+
+
+# Priors used in simulation study
+__Table__ Summaries of heterogeneity priors
+```{r, results='asis'}
+sum_U0.5 <- c(mean = 2.5, sd = 1.44, '2.5%' = 0.125, '25%' = 1.25, '50%' = 2.5, '75%' = 3.75, '97.5%' = 4.875)
+
+tab <- rbind(sum_U0.5,
+             get_hn_sum(sigma = 1),
+             get_hn_sum(sigma = 0.5))
+rownames(tab) <- c("U(0,5)", "HN(1)", "HN(0.5)")
+
+pander::pandoc.table(as.data.frame(tab), split.tables = Inf, justify = "left", digits = 3)
+rm(tab)
+```
+
+
+# Empirical priors for RE variance
+Turner et al priors: for contrasts.
+Therefore, arm-level heterogeneity (in terms of RE variance) is half (assuming equal variance of both arms).
+
+```{r}
+n.sim <- 100000
+
+## Turner et al 2012
+meanlog <- -3.02
+sdlog <- 1.85
+
+y <- rlnorm(n.sim, meanlog-log(2), sdlog)
+
+z <- rlnorm(n.sim, meanlog, sdlog)
+y.check <- z/2
+
+mean(y)
+mean(y.check)
+
+quantile(y, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+quantile(y.check, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+
+
+# ## Turner et al 2015
+# meanlog <- -2.71
+# sdlog <- 1.74
+# 
+# y <- rlnorm(n.sim, meanlog-log(2), sdlog)
+# 
+# mean(y)
+# quantile(y, probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
+
+ddens <- data.frame(x = seq(0, 0.1, 0.0001)) %>%
+  mutate(y = dlnorm(x, meanlog-log(2), sdlog))
+ggplot(data = ddens) +
+  geom_line(aes(x = x, y = y))
+```
+
+
+Transformation from tau^2 to tau.
+```{r}
+meanlog <- -3.02
+sdlog <- 1.85
+
+# closed form solution
+ddens <- data.frame(x = seq(0, 2, 0.001)) %>%
+  mutate(y = dlnorm(x^2, meanlog = meanlog, sdlog = sdlog) * 2 * x)
+
+
+# check via simulation
+ddens2 <- data.frame(tau2 = rlnorm(100000, meanlog = meanlog, sdlog = sdlog)) %>%
+  mutate(tau = sqrt(tau2))
+
+ggplot(data = ddens) +
+  geom_line(aes(x, y), linetype = "dashed") +
+  geom_density(data = ddens2, aes(tau), color = "blue")
+
+```
+
+
+
+
+# Session info
+```{r}
+getwd()
+sessionInfo()
+```
+
+

@@ -1,9 +1,5 @@
-# punta - Predictive UNcertainty in Tumour Agnostic therapies
+# punta - Predictive uncertainty in tumour agnostic therapies
 
+R scripts that accompany the MSc thesis submitted in part fulfilment of the MSc in Health Technology Assessment, College of Medical, Veterinary and Life Sciences, University of Glasgow.
 
-
-|Filename                                    | Description   |
-|:-------------------------------------------|:-------------------------------------------------------------------------|  
-|01-A-BHM-Casestudy-ORR-Larotrectinib        | Reproduce Bayesian hierarchical model for Larotrectinib ORR data from ERG analysis, NICE STA Committee papers (ID1299). |
-
-
+Sandro Gsteiger

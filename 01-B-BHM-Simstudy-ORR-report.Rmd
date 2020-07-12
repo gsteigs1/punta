@@ -166,18 +166,20 @@ fig <- ggplot(data = dhet, aes(x = re.sd)) +
 u_0_5  <- function(x){0.2}
 hn_1   <- function(x){2 * dnorm(x, 0, 1)}
 hn_0.5 <- function(x){2 * dnorm(x, 0, 0.5)}
+lower_bound <- function(x){dlnorm(x^2, meanlog = -3.02 - log(2), sdlog = 1.85) * 2 * x}
 
-dprior <- data.frame(x = seq(0, 5, 0.1)) %>%
+dprior <- data.frame(x = seq(0, 5, 0.0001)) %>%
   mutate("U(0,5)" = u_0_5(x),
          "HN(0.5)"= hn_0.5(x),
-         "HN(1)"   = hn_1(x)) %>%
-  gather(Prior, Density, 2:4)
+         "HN(1)"   = hn_1(x),
+         "Empirical lower bound" = lower_bound(x)) %>%
+  gather(Prior, Density, 2:5)
 
 fig1 <- ggplot(data = dprior, aes(x = x, y = Density)) +
   geom_area(aes(fill = Prior, linetype = Prior), 
             colour = 1, alpha = 0.5, position = "identity") +
   scale_x_continuous(limits = c(0, 5.05), breaks = seq(0, 5, 0.5), expand = c(0, 0)) +
-  scale_y_continuous(limits = c(0, 2), breaks = seq(0, 2, 0.5), expand = c(0, 0)) +
+  scale_y_continuous(limits = c(0, 4.5), breaks = seq(0, 4.5, 1), expand = c(0, 0)) +
   xlab("Random effects SD") +
   theme_bw() +
   theme(legend.position = "bottom")
