@@ -1209,7 +1209,7 @@ pander::pandoc.table(post_all, row.names = FALSE, split.tables = Inf, justify = 
 ```
 
 
-# Cumulative meta-analysis
+# Cumulative meta-analysis (ERG model, full data)
 ## Background
 Assess the impact of adding tissues with very low sample size. Intuitively, one would expect that as more and more tissue types become available, the data becomes more and more informative. However, by adding tissues with very small group size one may actually introduce more heterogeneity (as suggested by SA1 and SA2). 
 
@@ -1439,6 +1439,8 @@ for(i in 1:n_cma){
                          "srkf_B_mean_ij"= srfB_ij[["mean"]],
                          "asrk_med_ij" = absshrinkage_med_ij,
                          "asrk_mean_ij"= absshrinkage_mean_ij,
+                         "est_grp_med_ij" = est_grp_med_ij,
+                         "est_grp_mean_ij" = est_grp_mean_ij,
                          stringsAsFactors = FALSE)
     
     dshrinkage <- rbind(dshrinkage, out_ij)
@@ -1602,6 +1604,256 @@ ggplot(data = dshrinkage %>% filter(tissue_id <=3)) +
   theme(legend.title = element_blank())
 ```
 
+##### Shrunken group level estimates (fully Bayesian)
+__Figure__ Shrunken group level estimates: posterior medians
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = est_grp_med_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrunken estimates (logit scale)",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+__Figure__ Shrunken group level estimates: posterior means
+```{r}
+ggplot(data = dshrinkage) +
+  geom_line(aes(x = n_tissues, y = est_grp_mean_ij, color = tissue)) +
+  #ylim(-0.25, 1.25) +
+  scale_x_continuous(breaks = 3:14) +
+  labs(y = "Shrunken estimates (logit scale)",
+       x = "No tissues") +
+  theme_bw() +
+  theme(legend.title = element_blank())
+```
+
+
+# Reduced cumulative meta-analysis: impact of low information studies on vague prior (ERG model)
+## Background
+Redo analysis above, but only include studies no 8 onwards.
+
+The idea is to assess how the analysis changes compared to the prior when only such low information studies are used.
+
+## Data and "procedure"
+
+Recall the ORR data used by the ERG.
+```{r}
+# ORR data used by ERG
+dorr_erg 
+```
+
+Fit cumulative MA models, but add only the following data (study no 8 onwards).
+
+```{r}
+dorr_red <- dorr_erg[8:14,]
+dorr_red
+```
+
+This time, do the cumulative MAs adding studies one-by-one. Collect and report results from the first study on, i.e. to not impose a minimum of three studies. Interest will only be in the estimation of heterogeneity.
+
+## Run the cumulative MA
+
+Global parameters for BHM.
+
+```{r, echo=TRUE}
+n_chains <- 3
+n_iter <- 30000 # 15000 # double the iterations since for initial fits data limited
+n_burnin <- 4000 # 2000
+n_thin <- 2 # 1
+```
+
+
+```{r, echo=FALSE}
+set.seed(r_seed)
+
+cma_fits <- list()
+
+for(i in 1:nrow(dorr_red)){
+  dorr_red_i <- dorr_red[1:i,]
+  djags_i <- list(ns = nrow(dorr_red_i),
+                  r = dorr_red_i$x,
+                  n = dorr_red_i$n)
+  
+  fit_re_i <- jags(data = c(djags_i, erg_priors),
+                   n.chains = n_chains,
+                   n.iter = n_iter,
+                   n.burnin = n_burnin,
+                   n.thin = n_thin,
+                   parameters = c(pars_fe, "re.sd"),
+                   inits = NULL,
+                   model.file = "models/bin_abs_re_unif.jgmod")
+  
+  cma_fits[[i]] <- fit_re_i
+  rm(fit_re_i)
+}
+```
+
+## Cumulative MA results
+
+### Posterior summaries of RE SD
+
+```{r}
+# Initialize data frames to store results
+cma_resd <- as.data.frame(matrix(NA, # random effect SD (tau)
+                                 nrow = nrow(dorr_red), ncol = 8, 
+                                 dimnames = list(NULL, c("n_tissues", "n_tot", 
+                                                         "dn", "dr",
+                                                         "mean", "sd",
+                                                         "IQR",   "CrIR"))),
+                          
+                          check.names = FALSE)
+
+
+for (i in 1:length(cma_fits)){
+  fit_re_i <- cma_fits[[i]]
+  dorr_red_i <- dorr_red[1:i,]
+  dsums_i <- c(n_tissues = i,
+               n_tot = sum(dorr_red_i$n),
+               dn    = tail(dorr_red_i$n, 1),
+               dr    = tail(dorr_red_i$x, 1)
+               #r_tot = sum(dorr_red_i$x)
+               )
+  
+  
+  qts_resd_i <- get_quantiles(fit_re_i, node = "re.sd")
+  psum_resd_i <- fit_re_i$BUGSoutput$summary["re.sd", c("mean", "sd")]
+  
+  cma_resd[i,] <- c(dsums_i, psum_resd_i, qts_resd_i[c("IQR", "CrIR")]) 
+ 
+  rm(fit_re_i, dorr_red_i)
+}
+
+```
+
+
+__Table__ Reduced cumulative MA results: posterior summaries re.sd (low information studies, vague prior)
+```{r, results='asis'}
+pander::pandoc.table(cma_resd, row.names = FALSE, split.tables = Inf, justify = "left", digits = 2)
+```
+
+Compare this with the U(0, 5) prior summaries:
+__Table__ Summaries of U(0,5) prior
+```{r, results='asis'}
+duprior <- data.frame(mean = 2.5,
+                      sd = sqrt(25/12),
+                      IQR = 2.5,
+                      CrIR = 4.75)
+
+pander::pandoc.table(duprior, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
+
+
+# Reduced cumulative meta-analysis: impact of low information studies on informative prior (HN(0.5))
+## Background
+Redo analysis again, but now with informative prior.
+
+The hypothesis is that low information data points have no impact of vague prior (as seen above), but may have impact on informative prior.
+
+## Data and "procedure"
+
+Same as above, studies no. 8 onwards.
+```{r}
+dorr_red <- dorr_erg[8:14,]
+dorr_red
+```
+
+
+## Run the cumulative MA
+
+Global parameters for BHM.
+
+```{r, echo=TRUE}
+n_chains <- 3
+n_iter <- 30000 # 15000 # double the iterations since for initial fits data limited
+n_burnin <- 4000 # 2000
+n_thin <- 2 # 1
+```
+
+
+```{r, echo=FALSE}
+set.seed(r_seed)
+
+cma_fits <- list()
+
+for(i in 1:nrow(dorr_red)){
+  dorr_red_i <- dorr_red[1:i,]
+  djags_i <- list(ns = nrow(dorr_red_i),
+                  r = dorr_red_i$x,
+                  n = dorr_red_i$n)
+  
+  fit_re_i <- jags(data = c(djags_i, my_priors2),
+                   n.chains = n_chains,
+                   n.iter = n_iter,
+                   n.burnin = n_burnin,
+                   n.thin = n_thin,
+                   parameters = c(pars_fe, "re.sd"),
+                   inits = NULL,
+                   model.file = "models/bin_abs_re_hn.jgmod")
+  
+  cma_fits[[i]] <- fit_re_i
+  rm(fit_re_i)
+}
+```
+
+
+## Cumulative MA results
+
+### Posterior summaries of RE SD
+
+```{r}
+# Initialize data frames to store results
+cma_resd <- as.data.frame(matrix(NA, # random effect SD (tau)
+                                 nrow = nrow(dorr_red), ncol = 8, 
+                                 dimnames = list(NULL, c("n_tissues", "n_tot", 
+                                                         "dn", "dr",
+                                                         "mean", "sd",
+                                                         "IQR",   "CrIR"))),
+                          
+                          check.names = FALSE)
+
+
+for (i in 1:length(cma_fits)){
+  fit_re_i <- cma_fits[[i]]
+  dorr_red_i <- dorr_red[1:i,]
+  dsums_i <- c(n_tissues = i,
+               n_tot = sum(dorr_red_i$n),
+               dn    = tail(dorr_red_i$n, 1),
+               dr    = tail(dorr_red_i$x, 1)
+               #r_tot = sum(dorr_red_i$x)
+               )
+  
+  
+  qts_resd_i <- get_quantiles(fit_re_i, node = "re.sd")
+  psum_resd_i <- fit_re_i$BUGSoutput$summary["re.sd", c("mean", "sd")]
+  
+  cma_resd[i,] <- c(dsums_i, psum_resd_i, qts_resd_i[c("IQR", "CrIR")]) 
+ 
+  rm(fit_re_i, dorr_red_i)
+}
+
+```
+
+
+__Table__ Cumulative MA results: posterior summaries re.sd (low information studies, but informative prior)
+```{r, results='asis'}
+pander::pandoc.table(cma_resd, row.names = FALSE, split.tables = Inf, justify = "left", digits = 2)
+```
+
+Compare this with the HN(sigma=0.5) prior summaries:
+__Table__ Summaries of HN(sigma=0.5) prior
+```{r, results='asis'}
+
+hn_sum <- get_hn_sum(sigma = 0.5)
+
+dhnprior <- data.frame(mean = hn_sum['mean'],
+                      sd = hn_sum['sd'],
+                      IQR = hn_sum[6] - hn_sum[4],
+                      CrIR = hn_sum[7] - hn_sum[3])
+
+pander::pandoc.table(dhnprior, row.names = FALSE, split.tables = Inf, justify = "left", digits = 3)
+```
 
 
 
